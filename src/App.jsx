@@ -431,6 +431,7 @@ export default function App() {
   const isMob = useIsMobile();
   const [page, setPage]               = useState("home");
   const [user, setUser]               = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [selectedMovie, setMovie]     = useState(null);
   const [movies, setMovies]           = useState(MOVIES);
   const [filterCat, setFilterCat]     = useState("all");
@@ -440,13 +441,6 @@ export default function App() {
   const [adminTab, setAdminTab]       = useState("pending");
   const [notification, setNotify_]    = useState(null);
   const [heroIdx, setHeroIdx]         = useState(0);
-
-  const featured = movies.filter(m => m.status === "approved").slice(0, 5);
-  useEffect(() => {
-    if (!featured.length) return;
-    const t = setInterval(() => setHeroIdx(i => (i + 1) % featured.length), 6500);
-    return () => clearInterval(t);
-  }, [featured.length]);
 
   const notify = (msg, type = "success") => {
     setNotify_({ msg, type });
@@ -458,6 +452,56 @@ export default function App() {
     setPage(p);
     window.scrollTo(0, 0);
   };
+
+  const featured = movies.filter(m => m.status === "approved").slice(0, 5);
+
+  useEffect(() => {
+    if (!featured.length) return;
+    const t = setInterval(() => setHeroIdx(i => (i + 1) % featured.length), 6500);
+    return () => clearInterval(t);
+  }, [featured.length]);
+
+  // Restore session on every page load
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const { fetchAuthSession, fetchUserAttributes } = await import("aws-amplify/auth");
+        const session = await fetchAuthSession();
+        if (session?.tokens?.accessToken) {
+          const attrs = await fetchUserAttributes();
+          setUser({
+            name:   attrs.name || attrs.email?.split("@")[0],
+            email:  attrs.email,
+            role:   attrs["custom:role"] || "user",
+            plan:   attrs["custom:plan"] || "free",
+            userId: attrs.sub,
+          });
+        }
+      } catch {
+        setUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    restoreSession();
+  }, []);
+
+  const logout = async () => {
+    try {
+      const { signOut } = await import("aws-amplify/auth");
+      await signOut({ global: true });
+    } catch {}
+    setUser(null);
+    nav("home");
+    notify("You have been signed out.", "info");
+  };
+
+  if (authLoading) return (
+    <div style={{ minHeight:"100vh", background:"#07060f", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ width:44, height:44, borderRadius:"50%", border:"3px solid #9b6dff44", borderTopColor:"#9b6dff", animation:"spin .7s linear infinite" }}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
 
   const login = async () => {
     if (!loginForm.email || !loginForm.password) return notify("Fill all fields", "error");
@@ -486,7 +530,7 @@ export default function App() {
     }
   };
 
-  const logout = () => { setUser(null); nav("home"); notify("You have been signed out.", "info"); };
+
 
   const approveMovie = id => { setMovies(ms => ms.map(m => m.id === id ? { ...m, status:"approved" } : m)); notify("Film approved."); };
   const removeMovie  = id => { setMovies(ms => ms.filter(m => m.id !== id)); notify("Film removed.", "error"); };
