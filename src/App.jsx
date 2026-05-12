@@ -1529,24 +1529,150 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const pad = isMob ? "16px 16px 100px" : "36px 48px 80px";
   const thumbPreview = form.thumbFile ? URL.createObjectURL(form.thumbFile) : form.thumbUrl || null;
 
-  const submit = () => {
+  const [uploading,    setUploading]    = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const uploadToS3 = async (file, folder) => {
+    const key       = `${folder}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const bucket    = import.meta.env.VITE_S3_BUCKET;
+    const region    = import.meta.env.VITE_S3_REGION || "us-east-1";
+    const accessKey = import.meta.env.VITE_S3_ACCESS_KEY;
+    const secretKey = import.meta.env.VITE_S3_SECRET_KEY;
+    const url       = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+
+    // AWS Signature V4 signing
+    const now         = new Date();
+    const amzDate     = now.toISOString().replace(/[:-]|\.\d{3}/g, "").slice(0, 15) + "Z";
+    const dateStamp   = amzDate.slice(0, 8);
+    const contentType = file.type || "application/octet-stream";
+
+    // Helper: HMAC-SHA256
+    const hmac = async (key, msg) => {
+      const k = typeof key === "string" ? new TextEncoder().encode(key) : key;
+      const cryptoKey = await crypto.subtle.importKey("raw", k, { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
+      return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(msg)));
+    };
+
+    // Helper: SHA-256 hash of file content
+    const fileBuffer  = await file.arrayBuffer();
+    const hashBuffer  = await crypto.subtle.digest("SHA-256", fileBuffer);
+    const payloadHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2,"0")).join("");
+
+    // Canonical request
+    const canonicalHeaders = `content-type:${contentType}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+    const signedHeaders    = "content-type;host;x-amz-content-sha256;x-amz-date";
+    const canonicalRequest = `PUT\n/${key}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+
+    // String to sign
+    const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+    const hashCR          = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalRequest));
+    const hashedCR        = Array.from(new Uint8Array(hashCR)).map(b => b.toString(16).padStart(2,"0")).join("");
+    const stringToSign    = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${hashedCR}`;
+
+    // Signing key
+    const kDate    = await hmac(`AWS4${secretKey}`, dateStamp);
+    const kRegion  = await hmac(kDate,    region);
+    const kService = await hmac(kRegion,  "s3");
+    const kSigning = await hmac(kService, "aws4_request");
+    const sigArr   = await hmac(kSigning, stringToSign);
+    const signature = Array.from(sigArr).map(b => b.toString(16).padStart(2,"0")).join("");
+
+    const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type":           contentType,
+        "x-amz-date":             amzDate,
+        "x-amz-content-sha256":   payloadHash,
+        "Authorization":          authHeader,
+      },
+      body: fileBuffer,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`S3 ${res.status}: ${text.match(/<Message>(.*?)<\/Message>/)?.[1] || "Upload failed"}`);
+    }
+    return key;
+  };
+
+  const submit = async () => {
     if (!form.title || !form.desc) return notify("Title and description are required.", "error");
     if (!form.director) return notify("Director field is required.", "error");
-    const m = {
-      id:Date.now(), title:form.title, year:2025, rating:0, duration:"—",
-      category:form.category, genre:form.genre,
-      thumb: form.thumbUrl || "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=400&h=225&fit=crop",
-      banner:"https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=1400&h=600&fit=crop",
-      desc:form.desc, director:form.director, writer:form.writer || form.director,
-      studio:form.studio || "Independent", aiTool:form.aiTool, aiType:form.aiType,
-      maturity:form.maturity, views:"0", status:"pending",
-      uploader:user?.name || "guest", storage:form.storage,
-      audioTracks: form.audioTracks.map((f,i)=>({id:i,label:f.name.replace(/\.[^.]+$/,""),lang:"custom"})),
-      subtitles: form.subtitleFiles.map((f,i)=>({id:i+1,label:f.name.replace(/\.[^.]+$/,""),lang:"custom"})),
-    };
-    setMovies(ms => [...ms, m]);
-    notify("Submitted for admin review.");
-    nav("profile");
+    if (!form.videoFile) return notify("Please upload a video file.", "error");
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      notify("Uploading your film to the cloud…", "info");
+
+      // Upload video file
+      setUploadProgress(10);
+      const videoKey = await uploadToS3(form.videoFile, `uploads/${user?.userId || "guest"}/videos`);
+      setUploadProgress(60);
+
+      // Upload thumbnail if provided
+      let thumbKey = null;
+      if (form.thumbFile) {
+        thumbKey = await uploadToS3(form.thumbFile, `uploads/${user?.userId || "guest"}/thumbnails`);
+      }
+      setUploadProgress(80);
+
+      // Upload audio tracks
+      const audioKeys = [];
+      for (const audio of form.audioTracks) {
+        const key = await uploadToS3(audio, `uploads/${user?.userId || "guest"}/audio`);
+        audioKeys.push(key);
+      }
+
+      // Upload subtitle files
+      const subKeys = [];
+      for (const sub of form.subtitleFiles) {
+        const key = await uploadToS3(sub, `uploads/${user?.userId || "guest"}/subtitles`);
+        subKeys.push(key);
+      }
+
+      setUploadProgress(100);
+
+      // Add to local movies list as pending
+      const m = {
+        id:       Date.now(),
+        title:    form.title,
+        year:     2025,
+        rating:   0,
+        duration: "—",
+        category: form.category,
+        genre:    form.genre,
+        thumb:    form.thumbUrl || (thumbKey ? `https://${import.meta.env.VITE_S3_BUCKET}.s3.amazonaws.com/${thumbKey}` : "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=400&h=225&fit=crop"),
+        banner:   "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=1400&h=600&fit=crop",
+        desc:     form.desc,
+        director: form.director,
+        writer:   form.writer || form.director,
+        studio:   form.studio || "Independent",
+        aiTool:   form.aiTool,
+        aiType:   form.aiType,
+        maturity: form.maturity,
+        views:    "0",
+        status:   "pending",
+        uploader: user?.name || "guest",
+        videoKey,
+        thumbKey,
+        audioKeys,
+        subKeys,
+      };
+
+      setMovies(ms => [...ms, m]);
+      notify("Film uploaded successfully! Submitted for admin review. 🎬");
+      nav("profile");
+
+    } catch (e) {
+      notify(`Upload failed: ${e.message}`, "error");
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
   };
 
   const steps = ["File & Media","Film Details","Credits","Review"];
@@ -1843,9 +1969,14 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
           </div>
 
           <div style={{ display:"flex", gap:12 }}>
-            <button className="btn-ghost" onClick={() => setStep(3)}>Back</button>
-            <button className="btn-primary" style={{ flex:1, padding:"14px 0" }} onClick={submit}>
-              Submit for Review
+            <button className="btn-ghost" onClick={() => setStep(3)} disabled={uploading}>Back</button>
+            <button className="btn-primary" style={{ flex:1, padding:"14px 0", opacity:uploading?0.8:1 }} onClick={submit} disabled={uploading}>
+              {uploading ? (
+                <span style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+                  <div style={{ width:16, height:16, borderRadius:"50%", border:"2px solid #ffffff44", borderTopColor:"#fff", animation:"spin .7s linear infinite" }}/>
+                  Uploading… {uploadProgress}%
+                </span>
+              ) : "Submit for Review"}
             </button>
           </div>
         </div>
