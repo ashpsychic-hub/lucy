@@ -433,7 +433,12 @@ export default function App() {
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [selectedMovie, setMovie]     = useState(null);
-  const [movies, setMovies]           = useState(MOVIES);
+  const [movies, setMoviesRaw]        = useState(() => {
+    try {
+      const saved = localStorage.getItem("lucy_movies");
+      return saved ? [...MOVIES, ...JSON.parse(saved).filter(m => !MOVIES.find(seed => seed.id === m.id))] : MOVIES;
+    } catch { return MOVIES; }
+  });
   const [filterCat, setFilterCat]     = useState("all");
   const [searchQ, setSearchQ]         = useState("");
   const [loginMode, setLoginMode]     = useState("login");
@@ -445,6 +450,17 @@ export default function App() {
   const notify = (msg, type = "success") => {
     setNotify_({ msg, type });
     setTimeout(() => setNotify_(null), 3500);
+  };
+
+  // Persist movies to localStorage on every change
+  const setMovies = (updater) => {
+    setMoviesRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      // Only save user-uploaded films (not seed data)
+      const userFilms = next.filter(m => !MOVIES.find(seed => seed.id === m.id));
+      try { localStorage.setItem("lucy_movies", JSON.stringify(userFilms)); } catch {}
+      return next;
+    });
   };
 
   const nav = (p, movie = null) => {
@@ -798,7 +814,7 @@ function MovieCard({ movie, nav, isMob, cardW }) {
 }
 
 // ─── VIDEO PLAYER OVERLAY ──────────────────────────────────────────────────────
-function VideoPlayer({ movie, onClose, isMob }) {
+function VideoPlayer({ movie, episode, onClose, isMob }) {
   const [playing, setPlaying]         = useState(false);
   const [progress, setProgress]       = useState(0);
   const [speed, setSpeed]             = useState(1);
@@ -885,9 +901,20 @@ function VideoPlayer({ movie, onClose, isMob }) {
 
       {/* Video area */}
       <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
-        <img src={movie.banner} alt={movie.title}
-          style={{ width:"100%", height:"100%", objectFit:"cover",
-            filter:`brightness(${playing ? 0.5 : 0.3})`, transition:"filter .4s" }}/>
+        {episode?.videoUrl ? (
+          <video
+            key={episode.videoUrl}
+            src={episode.videoUrl}
+            style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
+            autoPlay
+            controls
+            playsInline
+          />
+        ) : (
+          <img src={movie.banner} alt={movie.title}
+            style={{ width:"100%", height:"100%", objectFit:"cover",
+              filter:`brightness(${playing ? 0.5 : 0.3})`, transition:"filter .4s" }}/>
+        )}
 
         {/* Subtitle overlay */}
         {showSubs && activeSub !== 0 && playing && (
@@ -1148,16 +1175,31 @@ function VideoPlayer({ movie, onClose, isMob }) {
   );
 }
 
-// ─── MOCK EPISODES ─────────────────────────────────────────────────────────────
+// ─── EPISODES ──────────────────────────────────────────────────────────────────
 function getEpisodes(movie) {
+  // If this is a real uploaded film with a video key — use it directly
+  if (movie.videoKey) {
+    const bucket = import.meta.env.VITE_S3_BUCKET;
+    const region = import.meta.env.VITE_S3_REGION || "us-east-1";
+    const videoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${movie.videoKey}`;
+    return [{
+      id:       1,
+      title:    movie.title,
+      duration: movie.duration || "—",
+      thumb:    movie.thumb,
+      desc:     movie.desc,
+      videoUrl, // Real S3 URL
+    }];
+  }
+  // Mock episodes for seed data only
   if (movie.category === "mini" || movie.category === "short") {
     return [{ id:1, title:movie.title, duration:movie.duration, thumb:movie.thumb, desc:movie.desc }];
   }
   return [
-    { id:1, title:"Episode 1 — Origin",     duration:"28m", thumb:movie.thumb, desc:"The story begins as our protagonist discovers the signal." },
-    { id:2, title:"Episode 2 — Frequency",  duration:"31m", thumb:movie.banner, desc:"Deeper into the labyrinth, a second voice is heard." },
-    { id:3, title:"Episode 3 — The Weight", duration:"29m", thumb:movie.thumb, desc:"Consequences arrive faster than anyone anticipated." },
-    { id:4, title:"Episode 4 — Resolution", duration:"33m", thumb:movie.banner, desc:"The final confrontation reshapes everything." },
+    { id:1, title:"Episode 1 — Origin",     duration:"28m", thumb:movie.thumb,   desc:"The story begins as our protagonist discovers the signal." },
+    { id:2, title:"Episode 2 — Frequency",  duration:"31m", thumb:movie.banner,  desc:"Deeper into the labyrinth, a second voice is heard." },
+    { id:3, title:"Episode 3 — The Weight", duration:"29m", thumb:movie.thumb,   desc:"Consequences arrive faster than anyone anticipated." },
+    { id:4, title:"Episode 4 — Resolution", duration:"33m", thumb:movie.banner,  desc:"The final confrontation reshapes everything." },
   ];
 }
 
@@ -1173,7 +1215,7 @@ function WatchPage({ movie, nav, movies, isMob }) {
 
   return (
     <>
-      {playerOpen && <VideoPlayer movie={activeEp ? {...movie, ...activeEp} : movie} onClose={()=>setPlayerOpen(false)} isMob={isMob}/>}
+      {playerOpen && <VideoPlayer movie={movie} episode={activeEp || episodes[0]} onClose={()=>setPlayerOpen(false)} isMob={isMob}/>}
 
       <div style={{ opacity:v?1:0, transition:"opacity .4s" }}>
         {/* HERO BANNER */}
