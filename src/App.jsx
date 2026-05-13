@@ -1232,8 +1232,8 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
 function getEpisodes(movie) {
   // If this is a real uploaded film with a video key — use it directly
   if (movie.videoKey) {
-    const bucket = import.meta.env.VITE_S3_BUCKET;
-    const region = import.meta.env.VITE_S3_REGION || "us-east-1";
+    const bucket = import.meta.env.VITE_S3_BUCKET || "lucy-raw-uploads-303602054242";
+const region = import.meta.env.VITE_S3_REGION || "us-east-1";
     const videoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${movie.videoKey}`;
     return [{
       id:       1,
