@@ -1658,6 +1658,7 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   if (!upload.ok) throw new Error("Upload failed");
   return key;
 };
+
 `;
 
     // AWS Signature V4 signing
