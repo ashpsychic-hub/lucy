@@ -345,15 +345,27 @@ function NavBar({ page, nav, user, logout, searchQ, setSearchQ, isMob }) {
         <button className="btn-primary" style={{ padding:"8px 22px", flexShrink:0 }} onClick={() => nav("login")}>Sign In</button>
       )}
 
-      {/* Mobile avatar or sign in */}
-      user ? (
-    <button onClick={() => nav("profile")} style={{
-      width:32, height:32, borderRadius:"50%", flexShrink:0,
-      background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
-      display:"flex", alignItems:"center", justifyContent:"center",
-      fontSize:13, fontWeight:700, color:"#fff", fontFamily:"'Syne',sans-serif",
-      border:`2px solid ${G.border}`,
-    }}>{user.name.charAt(0).toUpperCase()}</button>
+          {/* Mobile avatar or sign in */}
+      {isMob && !searchOpen && (
+        user ? (
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={() => nav("profile")} style={{
+              width:32, height:32, borderRadius:"50%", flexShrink:0,
+              background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:13, fontWeight:700, color:"#fff", fontFamily:"'Syne',sans-serif",
+              border:`2px solid ${G.border}`,
+            }}>{user.name.charAt(0).toUpperCase()}</button>
+            <button onClick={logout} style={{
+              background:`${G.error}15`, color:G.error, border:`1px solid ${G.error}30`,
+              borderRadius:8, padding:"6px 10px", fontSize:11, fontWeight:600,
+              fontFamily:"'Inter',sans-serif",
+            }}>Out</button>
+          </div>
+        ) : (
+          <button className="btn-primary" style={{ padding:"7px 14px", fontSize:12, flexShrink:0 }} onClick={() => nav("login")}>Sign In</button>
+        )
+      )}
     </nav>
   );
 }
