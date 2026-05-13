@@ -1634,12 +1634,31 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadToS3 = async (file, folder) => {
-    const key       = `${folder}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-    const bucket    = import.meta.env.VITE_S3_BUCKET;
-    const region    = import.meta.env.VITE_S3_REGION || "us-east-1";
-    const accessKey = import.meta.env.VITE_S3_ACCESS_KEY;
-    const secretKey = import.meta.env.VITE_S3_SECRET_KEY;
-    const url       = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+  const res = await fetch(`${BACKEND_URL}/api/presign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename:    file.name,
+      contentType: file.type || "application/octet-stream",
+      folder,
+    }),
+  });
+
+  if (!res.ok) throw new Error("Failed to get upload URL");
+  const { url, key } = await res.json();
+
+  const upload = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+
+  if (!upload.ok) throw new Error("Upload failed");
+  return key;
+};
+`;
 
     // AWS Signature V4 signing
     const now         = new Date();
