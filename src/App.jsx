@@ -34,7 +34,7 @@ const FONTS = `
 const CATEGORIES = {
   anime:"Anime", action:"Action", drama:"Drama", scifi:"Sci-Fi",
   romantic:"Romantic", horror:"Horror", documentary:"Documentary",
-  short:"Short Films", mini:"Mini Dramas",
+  short:"Short Films", mini:"Mini Dramas", music:"Music"
 };
 
 const MATURITY = ["G — General Audiences","PG — Parental Guidance","PG-13","R — Restricted","NC-17"];
