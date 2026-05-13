@@ -1230,20 +1230,15 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
 }
 
 // ─── EPISODES ──────────────────────────────────────────────────────────────────
+const S3_BASE = "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com";
+
 function getEpisodes(movie) {
-  // If this is a real uploaded film with a video key — use it directly
+  if (movie.videoUrl) {
+    return [{ id:1, title:movie.title, duration:movie.duration||"—", thumb:movie.thumb, desc:movie.desc, videoUrl:movie.videoUrl }];
+  }
   if (movie.videoKey) {
-    const bucket = import.meta.env.VITE_S3_BUCKET || "lucy-raw-uploads-303602054242";
-const region = import.meta.env.VITE_S3_REGION || "us-east-1";
-    const videoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${movie.videoKey}`;
-    return [{
-      id:       1,
-      title:    movie.title,
-      duration: movie.duration || "—",
-      thumb:    movie.thumb,
-      desc:     movie.desc,
-      videoUrl, // Real S3 URL
-    }];
+    const videoUrl = S3_BASE + "/" + movie.videoKey;
+    return [{ id:1, title:movie.title, duration:movie.duration||"—", thumb:movie.thumb, desc:movie.desc, videoUrl }];
   }
   // Mock episodes for seed data only
   if (movie.category === "mini" || movie.category === "short") {
