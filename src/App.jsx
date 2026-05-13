@@ -583,8 +583,8 @@ export default function App() {
         const updated = catalog.map(m => m.id === id ? { ...m, status:"approved" } : m);
         // Re-upload catalog
         const body    = new TextEncoder().encode(JSON.stringify(updated));
-        const accessKey = import.meta.env.VITE_S3_ACCESS_KEY;
-        const secretKey_ = import.meta.env.VITE_S3_SECRET_KEY;
+        const accessKey = "REMOVED";
+        const secretKey_ = "REMOVED";
         const now2    = new Date();
         const amzDate2= now2.toISOString().replace(/[:-]|\.\d{3}/g,"").slice(0,15)+"Z";
         const dateStamp2 = amzDate2.slice(0,8);
@@ -1740,8 +1740,8 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         // Rename — upload as catalog.json directly
         const catalogKey = "catalog.json";
         const catBuffer  = new TextEncoder().encode(JSON.stringify(catalog));
-        const accessKey  = import.meta.env.VITE_S3_ACCESS_KEY;
-        const secretKey_ = import.meta.env.VITE_S3_SECRET_KEY;
+        const accessKey  = "REMOVED";
+        const secretKey_ = "REMOVED";
         const now2       = new Date();
         const amzDate2   = now2.toISOString().replace(/[:-]|\.\d{3}/g, "").slice(0,15) + "Z";
         const dateStamp2 = amzDate2.slice(0,8);
