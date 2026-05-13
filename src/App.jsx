@@ -346,19 +346,14 @@ function NavBar({ page, nav, user, logout, searchQ, setSearchQ, isMob }) {
       )}
 
       {/* Mobile avatar or sign in */}
-      {isMob && !searchOpen && (
-        user ? (
-          <button onClick={() => nav("profile")} style={{
-            width:32, height:32, borderRadius:"50%", flexShrink:0,
-            background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
-            display:"flex", alignItems:"center", justifyContent:"center",
-            fontSize:13, fontWeight:700, color:"#fff", fontFamily:"'Syne',sans-serif",
-            border:`2px solid ${G.border}`,
-          }}>{user.name.charAt(0).toUpperCase()}</button>
-        ) : (
-          <button className="btn-primary" style={{ padding:"7px 14px", fontSize:12, flexShrink:0 }} onClick={() => nav("login")}>Sign In</button>
-        )
-      )}
+      user ? (
+    <button onClick={() => nav("profile")} style={{
+      width:32, height:32, borderRadius:"50%", flexShrink:0,
+      background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontSize:13, fontWeight:700, color:"#fff", fontFamily:"'Syne',sans-serif",
+      border:`2px solid ${G.border}`,
+    }}>{user.name.charAt(0).toUpperCase()}</button>
     </nav>
   );
 }
