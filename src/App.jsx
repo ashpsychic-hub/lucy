@@ -1260,6 +1260,9 @@ function WatchPage({ movie, nav, movies, isMob }) {
   const [detailTab, setDetailTab]   = useState("episodes"); // episodes | about | cast
   const related  = movies.filter(m => m.id !== movie.id && m.status === "approved" && m.category === movie.category).slice(0, 6);
   const episodes = getEpisodes(movie);
+  // DEBUG - remove after fixing
+  console.log("MOVIE:", JSON.stringify({id:movie.id, videoUrl:movie.videoUrl, videoKey:movie.videoKey}));
+  console.log("EPISODES:", JSON.stringify(episodes[0]));
   const pad = isMob ? "0 0 100px" : "0 0 80px";
 
   return (
