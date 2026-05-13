@@ -372,25 +372,19 @@ function BottomTabBar({ page, nav, user }) {
         <path d="M7 18v-6h6v6" stroke={a?G.accent:G.muted} strokeWidth="1.4" strokeLinejoin="round"/>
       </svg>
     )},
-    { id:"pricing", label:"Plans", icon:(a) => (
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-        <rect x="3" y="5" width="14" height="11" rx="2" stroke={a?G.accent:G.muted} strokeWidth="1.4" fill={a?`${G.accent}22`:"none"}/>
-        <path d="M3 9h14" stroke={a?G.accent:G.muted} strokeWidth="1.4"/>
-        <circle cx="7" cy="13" r="1" fill={a?G.accent:G.muted}/>
-      </svg>
-    )},
     { id:"upload", label:"Upload", icon:(a) => (
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
         <circle cx="11" cy="11" r="10" fill={a?G.accent:G.surface} stroke={a?G.accent:G.border} strokeWidth="1.4"/>
         <path d="M11 7v8M7.5 10.5l3.5-3.5 3.5 3.5" stroke={a?"#fff":G.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     ), center:true },
-    { id:"rules", label:"Rules", icon:(a) => (
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-        <rect x="4" y="2" width="12" height="16" rx="2" stroke={a?G.accent:G.muted} strokeWidth="1.4" fill={a?`${G.accent}22`:"none"}/>
-        <path d="M7 7h6M7 10h6M7 13h4" stroke={a?G.accent:G.muted} strokeWidth="1.2" strokeLinecap="round"/>
-      </svg>
-    )},
+    ...(user?.role === "admin" ? [{
+      id:"admin", label:"Admin", icon:(a) => (
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M10 2l2.4 4.8 5.3.8-3.85 3.75.91 5.3L10 14.1l-4.76 2.55.91-5.3L2.3 7.6l5.3-.8L10 2z" stroke={a?G.accent:G.muted} strokeWidth="1.4" fill={a?`${G.accent}22`:"none"} strokeLinejoin="round"/>
+        </svg>
+      ),
+    }] : []),
     { id: user ? "profile" : "login", label: user ? "Profile" : "Sign In", icon:(a) => (
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
         <circle cx="10" cy="7" r="3.5" stroke={a?G.accent:G.muted} strokeWidth="1.4" fill={a?`${G.accent}22`:"none"}/>
@@ -477,7 +471,28 @@ export default function App() {
     return () => clearInterval(t);
   }, [featured.length]);
 
-  // Restore session on every page load
+  // Load shared catalog from S3 on startup (cross-device sync)
+  useEffect(() => {
+    const loadCatalog = async () => {
+      try {
+        const bucket = import.meta.env.VITE_S3_BUCKET;
+        const region = import.meta.env.VITE_S3_REGION || "us-east-1";
+        const res    = await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json?t=${Date.now()}`);
+        if (res.ok) {
+          const catalog = await res.json();
+          if (Array.isArray(catalog) && catalog.length > 0) {
+            setMoviesRaw(prev => {
+              const seedIds = new Set(MOVIES.map(m => m.id));
+              const existing = new Set(prev.map(m => m.id));
+              const newFilms = catalog.filter(m => !seedIds.has(m.id) && !existing.has(m.id));
+              return newFilms.length ? [...prev, ...newFilms] : prev;
+            });
+          }
+        }
+      } catch {}
+    };
+    loadCatalog();
+  }, []);
   useEffect(() => {
     const restoreSession = async () => {
       try {
@@ -548,7 +563,46 @@ export default function App() {
 
 
 
-  const approveMovie = id => { setMovies(ms => ms.map(m => m.id === id ? { ...m, status:"approved" } : m)); notify("Film approved."); };
+  const approveMovie = async (id) => {
+    setMovies(ms => ms.map(m => m.id === id ? { ...m, status:"approved" } : m));
+    notify("Film approved.");
+    // Sync approval to S3 catalog
+    try {
+      const bucket  = import.meta.env.VITE_S3_BUCKET;
+      const region  = import.meta.env.VITE_S3_REGION || "us-east-1";
+      const res     = await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json?t=${Date.now()}`);
+      if (res.ok) {
+        const catalog = await res.json();
+        const updated = catalog.map(m => m.id === id ? { ...m, status:"approved" } : m);
+        // Re-upload catalog
+        const body    = new TextEncoder().encode(JSON.stringify(updated));
+        const accessKey = import.meta.env.VITE_S3_ACCESS_KEY;
+        const secretKey_ = import.meta.env.VITE_S3_SECRET_KEY;
+        const now2    = new Date();
+        const amzDate2= now2.toISOString().replace(/[:-]|\.\d{3}/g,"").slice(0,15)+"Z";
+        const dateStamp2 = amzDate2.slice(0,8);
+        const ct      = "application/json";
+        const hmac2   = async (key, msg) => {
+          const k = typeof key==="string" ? new TextEncoder().encode(key) : key;
+          const ck = await crypto.subtle.importKey("raw",k,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+          return new Uint8Array(await crypto.subtle.sign("HMAC",ck,new TextEncoder().encode(msg)));
+        };
+        const hashBuf = await crypto.subtle.digest("SHA-256", body);
+        const payHash = Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const canH    = `content-type:${ct}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payHash}\nx-amz-date:${amzDate2}\n`;
+        const signedH = "content-type;host;x-amz-content-sha256;x-amz-date";
+        const canReq  = `PUT\ncatalog.json\n\n${canH}\n${signedH}\n${payHash}`;
+        const credScope = `${dateStamp2}/${region}/s3/aws4_request`;
+        const hashCR  = await crypto.subtle.digest("SHA-256",new TextEncoder().encode(canReq));
+        const hashedCR= Array.from(new Uint8Array(hashCR)).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const sts     = `AWS4-HMAC-SHA256\n${amzDate2}\n${credScope}\n${hashedCR}`;
+        const kD=await hmac2(`AWS4${secretKey_}`,dateStamp2),kR=await hmac2(kD,region),kS=await hmac2(kR,"s3"),kSi=await hmac2(kS,"aws4_request"),sig=await hmac2(kSi,sts);
+        const sigHex  = Array.from(sig).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const auth    = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedH}, Signature=${sigHex}`;
+        await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json`,{method:"PUT",headers:{"Content-Type":ct,"x-amz-date":amzDate2,"x-amz-content-sha256":payHash,"Authorization":auth},body});
+      }
+    } catch (e) { console.warn("Catalog sync failed:", e.message); }
+  };
   const removeMovie  = id => { setMovies(ms => ms.filter(m => m.id !== id)); notify("Film removed.", "error"); };
 
   const filtered = movies.filter(m => {
@@ -907,7 +961,6 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
             src={episode.videoUrl}
             style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
             autoPlay
-            controls
             playsInline
           />
         ) : (
@@ -1687,8 +1740,8 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         duration: "—",
         category: form.category,
         genre:    form.genre,
-        thumb:    form.thumbUrl || (thumbKey ? `https://${import.meta.env.VITE_S3_BUCKET}.s3.amazonaws.com/${thumbKey}` : "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=400&h=225&fit=crop"),
-        banner:   "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=1400&h=600&fit=crop",
+        thumb:    form.thumbUrl || (thumbKey ? `https://${import.meta.env.VITE_S3_BUCKET}.s3.${import.meta.env.VITE_S3_REGION || "us-east-1"}.amazonaws.com/${thumbKey}` : "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=400&h=225&fit=crop"),
+        banner:   thumbKey ? `https://${import.meta.env.VITE_S3_BUCKET}.s3.${import.meta.env.VITE_S3_REGION || "us-east-1"}.amazonaws.com/${thumbKey}` : "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=1400&h=600&fit=crop",
         desc:     form.desc,
         director: form.director,
         writer:   form.writer || form.director,
@@ -1704,6 +1757,57 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         audioKeys,
         subKeys,
       };
+
+      // Save to shared S3 catalog so all devices can see it
+      try {
+        const bucket  = import.meta.env.VITE_S3_BUCKET;
+        const region  = import.meta.env.VITE_S3_REGION || "us-east-1";
+        const catUrl  = `https://${bucket}.s3.${region}.amazonaws.com/catalog.json`;
+        let catalog   = [];
+        try {
+          const res = await fetch(catUrl + "?t=" + Date.now());
+          if (res.ok) catalog = await res.json();
+        } catch {}
+        catalog.push(m);
+        await uploadToS3(new Blob([JSON.stringify(catalog)], { type:"application/json" }), "");
+        // Rename — upload as catalog.json directly
+        const catalogKey = "catalog.json";
+        const catBuffer  = new TextEncoder().encode(JSON.stringify(catalog));
+        const accessKey  = import.meta.env.VITE_S3_ACCESS_KEY;
+        const secretKey_ = import.meta.env.VITE_S3_SECRET_KEY;
+        const now2       = new Date();
+        const amzDate2   = now2.toISOString().replace(/[:-]|\.\d{3}/g, "").slice(0,15) + "Z";
+        const dateStamp2 = amzDate2.slice(0,8);
+        const contentType2 = "application/json";
+        const hmac2 = async (key, msg) => {
+          const k = typeof key === "string" ? new TextEncoder().encode(key) : key;
+          const ck = await crypto.subtle.importKey("raw", k, {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+          return new Uint8Array(await crypto.subtle.sign("HMAC", ck, new TextEncoder().encode(msg)));
+        };
+        const hashBuf2   = await crypto.subtle.digest("SHA-256", catBuffer);
+        const payHash2   = Array.from(new Uint8Array(hashBuf2)).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const canHeaders2 = `content-type:${contentType2}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payHash2}\nx-amz-date:${amzDate2}\n`;
+        const signedH2   = "content-type;host;x-amz-content-sha256;x-amz-date";
+        const canReq2    = `PUT\n/${catalogKey}\n\n${canHeaders2}\n${signedH2}\n${payHash2}`;
+        const credScope2 = `${dateStamp2}/${region}/s3/aws4_request`;
+        const hashCR2    = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canReq2));
+        const hashedCR2  = Array.from(new Uint8Array(hashCR2)).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const sts2       = `AWS4-HMAC-SHA256\n${amzDate2}\n${credScope2}\n${hashedCR2}`;
+        const kD2 = await hmac2(`AWS4${secretKey_}`, dateStamp2);
+        const kR2 = await hmac2(kD2, region);
+        const kS2 = await hmac2(kR2, "s3");
+        const kSi2= await hmac2(kS2, "aws4_request");
+        const sig2= await hmac2(kSi2, sts2);
+        const sigHex2 = Array.from(sig2).map(b=>b.toString(16).padStart(2,"0")).join("");
+        const auth2 = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope2}, SignedHeaders=${signedH2}, Signature=${sigHex2}`;
+        await fetch(`https://${bucket}.s3.${region}.amazonaws.com/${catalogKey}`, {
+          method:"PUT",
+          headers:{"Content-Type":contentType2,"x-amz-date":amzDate2,"x-amz-content-sha256":payHash2,"Authorization":auth2},
+          body: catBuffer,
+        });
+      } catch (catalogErr) {
+        console.warn("Catalog save failed:", catalogErr.message);
+      }
 
       setMovies(ms => [...ms, m]);
       notify("Film uploaded successfully! Submitted for admin review. 🎬");
