@@ -1634,87 +1634,28 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadToS3 = async (file, folder) => {
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
-  const res = await fetch(`${BACKEND_URL}/api/presign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filename:    file.name,
-      contentType: file.type || "application/octet-stream",
-      folder,
-    }),
-  });
-
-  if (!res.ok) throw new Error("Failed to get upload URL");
-  const { url, key } = await res.json();
-
-  const upload = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": file.type || "application/octet-stream" },
-    body: file,
-  });
-
-  if (!upload.ok) throw new Error("Upload failed");
-  return key;
-};
-
-`;
-
-    // AWS Signature V4 signing
-    const now         = new Date();
-    const amzDate     = now.toISOString().replace(/[:-]|\.\d{3}/g, "").slice(0, 15) + "Z";
-    const dateStamp   = amzDate.slice(0, 8);
-    const contentType = file.type || "application/octet-stream";
-
-    // Helper: HMAC-SHA256
-    const hmac = async (key, msg) => {
-      const k = typeof key === "string" ? new TextEncoder().encode(key) : key;
-      const cryptoKey = await crypto.subtle.importKey("raw", k, { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
-      return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(msg)));
-    };
-
-    // Helper: SHA-256 hash of file content
-    const fileBuffer  = await file.arrayBuffer();
-    const hashBuffer  = await crypto.subtle.digest("SHA-256", fileBuffer);
-    const payloadHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2,"0")).join("");
-
-    // Canonical request
-    const canonicalHeaders = `content-type:${contentType}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
-    const signedHeaders    = "content-type;host;x-amz-content-sha256;x-amz-date";
-    const canonicalRequest = `PUT\n/${key}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
-
-    // String to sign
-    const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
-    const hashCR          = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalRequest));
-    const hashedCR        = Array.from(new Uint8Array(hashCR)).map(b => b.toString(16).padStart(2,"0")).join("");
-    const stringToSign    = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${hashedCR}`;
-
-    // Signing key
-    const kDate    = await hmac(`AWS4${secretKey}`, dateStamp);
-    const kRegion  = await hmac(kDate,    region);
-    const kService = await hmac(kRegion,  "s3");
-    const kSigning = await hmac(kService, "aws4_request");
-    const sigArr   = await hmac(kSigning, stringToSign);
-    const signature = Array.from(sigArr).map(b => b.toString(16).padStart(2,"0")).join("");
-
-    const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: {
-        "Content-Type":           contentType,
-        "x-amz-date":             amzDate,
-        "x-amz-content-sha256":   payloadHash,
-        "Authorization":          authHeader,
-      },
-      body: fileBuffer,
+    const res = await fetch(`${BACKEND_URL}/api/presign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename:    file.name,
+        contentType: file.type || "application/octet-stream",
+        folder,
+      }),
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`S3 ${res.status}: ${text.match(/<Message>(.*?)<\/Message>/)?.[1] || "Upload failed"}`);
-    }
+    if (!res.ok) throw new Error("Failed to get upload URL");
+    const { url, key } = await res.json();
+
+    const upload = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+
+    if (!upload.ok) throw new Error("Upload to S3 failed");
     return key;
   };
 
