@@ -475,7 +475,7 @@ export default function App() {
   useEffect(() => {
     const loadCatalog = async () => {
       try {
-        const bucket = import.meta.env.VITE_S3_BUCKET;
+        const bucket = import.meta.env.VITE_S3_BUCKET || "lucy-raw-uploads-303602054242";
         const region = import.meta.env.VITE_S3_REGION || "us-east-1";
         const res    = await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json?t=${Date.now()}`);
         if (res.ok) {
