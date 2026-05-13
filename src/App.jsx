@@ -955,10 +955,10 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
 
       {/* Video area */}
       <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
-        {episode?.videoUrl ? (
+        {(episode?.videoUrl || movie?.videoUrl || movie?.videoKey) ? (
   <video
-    key={episode.videoUrl}
-    src={episode.videoUrl}
+    key={episode?.videoUrl || movie?.videoUrl || movie?.videoKey}
+    src={episode?.videoUrl || movie?.videoUrl || (movie?.videoKey ? "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com/" + movie.videoKey : null)}
     style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
     autoPlay
     playsInline
