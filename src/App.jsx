@@ -966,7 +966,7 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
   <video
     key={episode?.videoUrl || movie?.videoUrl || movie?.videoKey}
     src={episode?.videoUrl || movie?.videoUrl || (movie?.videoKey ? "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com/" + movie.videoKey : null)}
-    style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
+    style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000", position:"absolute", inset:0, zIndex:10 }}
     autoPlay
     playsInline
     controls
