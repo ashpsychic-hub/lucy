@@ -956,13 +956,14 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
       {/* Video area */}
       <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
         {episode?.videoUrl ? (
-          <video
-            key={episode.videoUrl}
-            src={episode.videoUrl}
-            style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
-            autoPlay
-            playsInline
-          />
+  <video
+    key={episode.videoUrl}
+    src={episode.videoUrl}
+    style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000" }}
+    autoPlay
+    playsInline
+    controls
+  />
         ) : (
           <img src={movie.banner} alt={movie.title}
             style={{ width:"100%", height:"100%", objectFit:"cover",
