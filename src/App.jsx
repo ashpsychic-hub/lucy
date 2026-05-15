@@ -490,9 +490,18 @@ export default function App() {
           if (Array.isArray(catalog) && catalog.length > 0) {
             setMoviesRaw(prev => {
               const seedIds = new Set(MOVIES.map(m => m.id));
-              const existing = new Set(prev.map(m => m.id));
-              const newFilms = catalog.filter(m => !seedIds.has(m.id) && !existing.has(m.id));
-              return newFilms.length ? [...prev, ...newFilms] : prev;
+              // Merge catalog - update existing films and add new ones
+              const catalogMap = new Map(catalog.map(m => [m.id, m]));
+              const merged = prev.map(m => catalogMap.has(m.id) ? {...m, ...catalogMap.get(m.id)} : m);
+              const existingIds = new Set(prev.map(m => m.id));
+              const newFilms = catalog.filter(m => !existingIds.has(m.id));
+              const result = [...merged, ...newFilms];
+              // Update localStorage with merged data
+              try {
+                const userFilms = result.filter(m => !MOVIES.find(s => s.id === m.id));
+                localStorage.setItem("lucy_movies", JSON.stringify(userFilms));
+              } catch {}
+              return result;
             });
           }
         }
