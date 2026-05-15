@@ -1727,43 +1727,24 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
           if (res.ok) catalog = await res.json();
         } catch {}
         catalog.push(m);
-        await uploadToS3(new Blob([JSON.stringify(catalog)], { type:"application/json" }), "");
-        // Rename — upload as catalog.json directly
-        const catalogKey = "catalog.json";
-        const catBuffer  = new TextEncoder().encode(JSON.stringify(catalog));
-        const accessKey  = "REMOVED";
-        const secretKey_ = "REMOVED";
-        const now2       = new Date();
-        const amzDate2   = now2.toISOString().replace(/[:-]|\.\d{3}/g, "").slice(0,15) + "Z";
-        const dateStamp2 = amzDate2.slice(0,8);
-        const contentType2 = "application/json";
-        const hmac2 = async (key, msg) => {
-          const k = typeof key === "string" ? new TextEncoder().encode(key) : key;
-          const ck = await crypto.subtle.importKey("raw", k, {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
-          return new Uint8Array(await crypto.subtle.sign("HMAC", ck, new TextEncoder().encode(msg)));
-        };
-        const hashBuf2   = await crypto.subtle.digest("SHA-256", catBuffer);
-        const payHash2   = Array.from(new Uint8Array(hashBuf2)).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const canHeaders2 = `content-type:${contentType2}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payHash2}\nx-amz-date:${amzDate2}\n`;
-        const signedH2   = "content-type;host;x-amz-content-sha256;x-amz-date";
-        const canReq2    = `PUT\n/${catalogKey}\n\n${canHeaders2}\n${signedH2}\n${payHash2}`;
-        const credScope2 = `${dateStamp2}/${region}/s3/aws4_request`;
-        const hashCR2    = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canReq2));
-        const hashedCR2  = Array.from(new Uint8Array(hashCR2)).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const sts2       = `AWS4-HMAC-SHA256\n${amzDate2}\n${credScope2}\n${hashedCR2}`;
-        const kD2 = await hmac2(`AWS4${secretKey_}`, dateStamp2);
-        const kR2 = await hmac2(kD2, region);
-        const kS2 = await hmac2(kR2, "s3");
-        const kSi2= await hmac2(kS2, "aws4_request");
-        const sig2= await hmac2(kSi2, sts2);
-        const sigHex2 = Array.from(sig2).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const auth2 = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope2}, SignedHeaders=${signedH2}, Signature=${sigHex2}`;
-        await fetch(`https://${bucket}.s3.${region}.amazonaws.com/${catalogKey}`, {
-          method:"PUT",
-          headers:{"Content-Type":contentType2,"x-amz-date":amzDate2,"x-amz-content-sha256":payHash2,"Authorization":auth2},
-          body: catBuffer,
-        });
-      } catch (catalogErr) {
+        // Save catalog via Lambda presigned URL
+        try {
+          const lambdaUrl = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
+          const { fetchAuthSession } = await import("aws-amplify/auth");
+          const sess = await fetchAuthSession();
+          const tok = sess.tokens?.accessToken?.toString() || "";
+          const pr = await fetch(lambdaUrl, {
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
+            body: JSON.stringify({filename:"catalog.json",contentType:"application/json",folder:""}),
+          });
+          if (pr.ok) {
+            const {url} = await pr.json();
+            await fetch(url, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(catalog)});
+          }
+        } catch (catalogErr) {
+          console.warn("Catalog save failed:", catalogErr.message);
+        }
         console.warn("Catalog save failed:", catalogErr.message);
       }
 
