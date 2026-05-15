@@ -1745,7 +1745,7 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         } catch (catalogErr) {
           console.warn("Catalog save failed:", catalogErr.message);
         }
-      }
+      } catch(outerCatalogErr) { console.warn("Catalog error:", outerCatalogErr.message); }
 
       setMovies(ms => [...ms, m]);
       notify("Film uploaded successfully! Submitted for admin review. 🎬");
