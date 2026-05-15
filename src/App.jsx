@@ -1632,7 +1632,14 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({
         filename:    file.name,
-        contentType: file.type || "application/octet-stream",
+        contentType: file.type || (
+          file.name?.match(/\.mp4$/i) ? "video/mp4" :
+          file.name?.match(/\.mov$/i) ? "video/quicktime" :
+          file.name?.match(/\.(jpg|jpeg)$/i) ? "image/jpeg" :
+          file.name?.match(/\.png$/i) ? "image/png" :
+          file.name?.match(/\.webp$/i) ? "image/webp" :
+          "video/mp4"
+        ),
         folder,
       }),
     });
