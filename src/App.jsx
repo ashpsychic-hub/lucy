@@ -581,32 +581,21 @@ export default function App() {
       if (res.ok) {
         const catalog = await res.json();
         const updated = catalog.map(m => m.id === id ? { ...m, status:"approved" } : m);
-        // Re-upload catalog
-        const body    = new TextEncoder().encode(JSON.stringify(updated));
-        const accessKey = "REMOVED";
-        const secretKey_ = "REMOVED";
-        const now2    = new Date();
-        const amzDate2= now2.toISOString().replace(/[:-]|\.\d{3}/g,"").slice(0,15)+"Z";
-        const dateStamp2 = amzDate2.slice(0,8);
-        const ct      = "application/json";
-        const hmac2   = async (key, msg) => {
-          const k = typeof key==="string" ? new TextEncoder().encode(key) : key;
-          const ck = await crypto.subtle.importKey("raw",k,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
-          return new Uint8Array(await crypto.subtle.sign("HMAC",ck,new TextEncoder().encode(msg)));
-        };
-        const hashBuf = await crypto.subtle.digest("SHA-256", body);
-        const payHash = Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const canH    = `content-type:${ct}\nhost:${bucket}.s3.${region}.amazonaws.com\nx-amz-content-sha256:${payHash}\nx-amz-date:${amzDate2}\n`;
-        const signedH = "content-type;host;x-amz-content-sha256;x-amz-date";
-        const canReq  = `PUT\ncatalog.json\n\n${canH}\n${signedH}\n${payHash}`;
-        const credScope = `${dateStamp2}/${region}/s3/aws4_request`;
-        const hashCR  = await crypto.subtle.digest("SHA-256",new TextEncoder().encode(canReq));
-        const hashedCR= Array.from(new Uint8Array(hashCR)).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const sts     = `AWS4-HMAC-SHA256\n${amzDate2}\n${credScope}\n${hashedCR}`;
-        const kD=await hmac2(`AWS4${secretKey_}`,dateStamp2),kR=await hmac2(kD,region),kS=await hmac2(kR,"s3"),kSi=await hmac2(kS,"aws4_request"),sig=await hmac2(kSi,sts);
-        const sigHex  = Array.from(sig).map(b=>b.toString(16).padStart(2,"0")).join("");
-        const auth    = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedH}, Signature=${sigHex}`;
-        await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json`,{method:"PUT",headers:{"Content-Type":ct,"x-amz-date":amzDate2,"x-amz-content-sha256":payHash,"Authorization":auth},body});
+        try {
+          const { fetchAuthSession } = await import("aws-amplify/auth");
+          const sess = await fetchAuthSession();
+          const tok = sess.tokens?.accessToken?.toString() || "";
+          const lambdaUrl = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
+          const pr = await fetch(lambdaUrl, {
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
+            body: JSON.stringify({filename:"catalog.json",contentType:"application/json",folder:""}),
+          });
+          if (pr.ok) {
+            const {url} = await pr.json();
+            await fetch(url, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(updated)});
+          }
+        } catch(e) { console.warn("Catalog sync failed:", e.message); }
       }
     } catch (e) { console.warn("Catalog sync failed:", e.message); }
   };
