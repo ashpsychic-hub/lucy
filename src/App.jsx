@@ -1634,11 +1634,13 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadToS3 = async (file, folder) => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-
-    const res = await fetch(`${BACKEND_URL}/api/presign`, {
+    const BACKEND_URL = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
+    const { fetchAuthSession } = await import("aws-amplify/auth");
+    const session = await fetchAuthSession();
+    const token = session.tokens?.accessToken?.toString() || "";
+    const res = await fetch(BACKEND_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({
         filename:    file.name,
         contentType: file.type || "application/octet-stream",
