@@ -1745,7 +1745,6 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         } catch (catalogErr) {
           console.warn("Catalog save failed:", catalogErr.message);
         }
-        console.warn("Catalog save failed:", catalogErr.message);
       }
 
       setMovies(ms => [...ms, m]);
