@@ -1238,18 +1238,393 @@ function getEpisodes(movie) {
   ];
 }
 
-// ─── WATCH PAGE (Detail + Episodes) ──────────────────────────────────────────
+// ─── WATCH PAGE (Cinematic Film Page) ────────────────────────────────────────
 function WatchPage({ movie, nav, movies, isMob }) {
   const v = useAnimateIn(movie.id);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [activeEp, setActiveEp]     = useState(null);
-  const [detailTab, setDetailTab]   = useState("episodes"); // episodes | about | cast
-  const related  = movies.filter(m => m.id !== movie.id && m.status === "approved" && m.category === movie.category).slice(0, 6);
+  const [activeTab, setActiveTab]   = useState("story"); // story | process | credits
+  const related  = movies.filter(m => m.id !== movie.id && m.status === "approved" && m.category === movie.category).slice(0, 4);
   const episodes = getEpisodes(movie);
-  // DEBUG - remove after fixing
-  console.log("MOVIE:", JSON.stringify({id:movie.id, videoUrl:movie.videoUrl, videoKey:movie.videoKey}));
-  console.log("EPISODES:", JSON.stringify(episodes[0]));
-  const pad = isMob ? "0 0 100px" : "0 0 80px";
+
+  // Remove debug logs
+  const isFilm = movie.category === "short" || movie.category === "mini" || (movie.videoUrl || movie.videoKey);
+
+  return (
+    <>
+      {playerOpen && <VideoPlayer movie={movie} episode={activeEp || episodes[0]} onClose={()=>setPlayerOpen(false)} isMob={isMob}/>}
+
+      <div style={{ opacity:v?1:0, transition:"opacity .5s", paddingBottom: isMob ? 100 : 80 }}>
+
+        {/* ── CINEMATIC HERO ── */}
+        <div style={{ position:"relative", height: isMob ? "60vw" : "55vh", minHeight: isMob ? 220 : 340, overflow:"hidden" }}>
+          <img src={movie.banner || movie.thumb} alt={movie.title}
+            style={{ width:"100%", height:"100%", objectFit:"cover", filter:"brightness(.35)", transform:"scale(1.05)" }}/>
+          {/* Multi-layer gradient for cinematic depth */}
+          <div style={{ position:"absolute", inset:0, background:`linear-gradient(0deg, ${G.bg} 0%, ${G.bg}99 15%, ${G.bg}44 45%, transparent 75%)` }}/>
+          <div style={{ position:"absolute", inset:0, background:`linear-gradient(90deg, ${G.bg}88 0%, transparent 60%)` }}/>
+
+          {/* Back */}
+          <button className="btn-ghost" onClick={()=>nav("home")} style={{
+            position:"absolute", top:16, left: isMob?14:24,
+            display:"flex", alignItems:"center", gap:6, padding:"7px 12px", fontSize:12,
+            background:"#0009", backdropFilter:"blur(8px)",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            {!isMob && "Discover"}
+          </button>
+
+          {/* Film still credit */}
+          <div style={{ position:"absolute", bottom:16, right:isMob?14:24, fontSize:10, color:"rgba(255,255,255,.3)", fontFamily:"'Inter',sans-serif", letterSpacing:".06em" }}>
+            STILL FROM FILM
+          </div>
+        </div>
+
+        {/* ── FILM IDENTITY ── */}
+        <div style={{ padding: isMob ? "0 16px" : "0 40px", maxWidth:1000, margin:"0 auto" }}>
+
+          {/* Genre chips */}
+          <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", marginTop: isMob ? -8 : -12 }}>
+            {(Array.isArray(movie.genre) ? movie.genre : [movie.genre]).filter(Boolean).slice(0,3).map(g => (
+              <Chip key={g} label={g} color={G.accent}/>
+            ))}
+            {movie.maturity && <Chip label={movie.maturity} color={G.muted}/>}
+            {movie.aiType && <Chip label={movie.aiType} color={G.lavender}/>}
+          </div>
+
+          {/* Title — large serif */}
+          <h1 style={{
+            fontFamily:"'Cormorant Garamond',serif",
+            fontSize: isMob ? "clamp(28px,8vw,40px)" : "clamp(36px,4.5vw,56px)",
+            fontWeight:700, lineHeight:1.0, marginBottom:10, letterSpacing:"-.01em",
+          }}>{movie.title}</h1>
+
+          {/* Director line — film programme style */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+            <span style={{ fontSize: isMob?12:13, color:G.muted, fontFamily:"'Inter',sans-serif", letterSpacing:".04em", textTransform:"uppercase" }}>
+              A film by
+            </span>
+            <span style={{ fontSize: isMob?13:15, fontWeight:600, color:G.lavender, fontFamily:"'Cormorant Garamond',serif", fontStyle:"italic" }}>
+              {movie.director || movie.uploader || "Unknown"}
+            </span>
+            <span style={{ color:G.dim, fontSize:12 }}>·</span>
+            <span style={{ fontSize:12, color:G.muted }}>{movie.year}</span>
+            {movie.duration && <><span style={{ color:G.dim, fontSize:12 }}>·</span><span style={{ fontSize:12, color:G.muted }}>{movie.duration}</span></>}
+            {movie.rating > 0 && <><span style={{ color:G.dim, fontSize:12 }}>·</span><span style={{ fontSize:12, color:G.gold }}>★ {movie.rating}/10</span></>}
+          </div>
+
+          {/* Primary CTA */}
+          <div style={{ display:"flex", gap:10, marginBottom:32, flexWrap:"wrap" }}>
+            <button className="btn-primary" style={{
+              display:"flex", alignItems:"center", gap:10,
+              padding: isMob?"12px 24px":"14px 32px", fontSize:14, letterSpacing:".02em",
+            }} onClick={()=>{ setActiveEp(null); setPlayerOpen(true); }}>
+              <svg width="12" height="14" viewBox="0 0 12 14" fill="none"><path d="M1 1l10 6L1 13V1z" fill="white"/></svg>
+              Watch Film
+            </button>
+            {related.length > 0 && (
+              <button className="btn-ghost" style={{ padding: isMob?"11px 18px":"13px 22px", fontSize:13 }}>
+                + Watchlist
+              </button>
+            )}
+          </div>
+
+          {/* ── EDITORIAL SYNOPSIS ── */}
+          <div style={{ marginBottom:40, maxWidth:680 }}>
+            <p style={{
+              color:G.textSoft, lineHeight:1.95, fontSize: isMob?13:15,
+              fontFamily:"'Inter',sans-serif",
+              borderLeft:`2px solid ${G.accent}44`,
+              paddingLeft:20,
+            }}>
+              {movie.desc || "No synopsis provided."}
+            </p>
+          </div>
+
+          {/* ── TABS ── */}
+          <div style={{ display:"flex", gap:0, borderBottom:`1px solid ${G.border}`, marginBottom:28 }}>
+            {[
+              { id:"story",    label:"Story" },
+              { id:"process",  label:"Director's Notes" },
+              { id:"credits",  label:"Credits & Disclosure" },
+              ...(episodes.length > 1 ? [{ id:"episodes", label:"Episodes" }] : []),
+            ].map(t => (
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{
+                padding: isMob?"10px 12px":"11px 20px",
+                fontSize: isMob?11:12, fontWeight: activeTab===t.id?600:400,
+                letterSpacing:".04em", textTransform:"uppercase",
+                color: activeTab===t.id ? G.accent : G.muted,
+                background:"none", borderBottom: activeTab===t.id ? `2px solid ${G.accent}` : "2px solid transparent",
+                marginBottom:-1, transition:"color .2s", whiteSpace:"nowrap",
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          <div style={{ display: isMob?"flex":"grid", flexDirection: isMob?"column":undefined, gridTemplateColumns: isMob?undefined:"1fr 280px", gap: isMob?24:40 }}>
+
+            {/* ── MAIN CONTENT ── */}
+            <div>
+
+              {/* STORY TAB */}
+              {activeTab === "story" && (
+                <div>
+                  {/* Extended synopsis placeholder */}
+                  <div style={{ marginBottom:28 }}>
+                    <p style={{ color:G.textSoft, lineHeight:1.9, fontSize: isMob?13:14, marginBottom:16 }}>
+                      {movie.desc || "No synopsis available."}
+                    </p>
+                    {movie.desc && movie.desc.length < 200 && (
+                      <p style={{ color:G.muted, lineHeight:1.9, fontSize: isMob?12:13, fontStyle:"italic" }}>
+                        Creator has not provided an extended synopsis.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* AI Disclosure box */}
+                  <div style={{
+                    background:`${G.surface}`, border:`1px solid ${G.border}`,
+                    borderRadius:12, padding: isMob?"14px 16px":"18px 22px", marginBottom:28,
+                  }}>
+                    <div style={{ fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", marginBottom:12, fontWeight:600 }}>
+                      Production Disclosure
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap: isMob?10:14 }}>
+                      {[
+                        { label:"AI Tools",       value: movie.aiTool || movie.ai_tool || "Not specified" },
+                        { label:"AI Involvement",  value: movie.aiType || "Not specified" },
+                        { label:"Director",        value: movie.director || "Not specified" },
+                        { label:"Studio",          value: movie.studio || "Independent" },
+                      ].map(({ label, value }) => (
+                        <div key={label}>
+                          <div style={{ fontSize:10, color:G.muted, letterSpacing:".06em", textTransform:"uppercase", marginBottom:3 }}>{label}</div>
+                          <div style={{ fontSize:12, fontWeight:500, color:G.text }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Film still — single large image */}
+                  <div style={{ borderRadius:12, overflow:"hidden", marginBottom:28, aspectRatio:"2.39/1", background:G.card }}>
+                    <img src={movie.thumb} alt={movie.title} style={{ width:"100%", height:"100%", objectFit:"cover", opacity:.8 }}/>
+                  </div>
+                </div>
+              )}
+
+              {/* DIRECTOR'S NOTES TAB */}
+              {activeTab === "process" && (
+                <div>
+                  <div style={{ marginBottom:24 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
+                      <div style={{
+                        width:44, height:44, borderRadius:"50%",
+                        background:`linear-gradient(135deg,${G.accent}44,${G.accentDim}44)`,
+                        border:`1px solid ${G.accent}33`,
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:G.accent, fontSize:18,
+                      }}>
+                        {(movie.director || movie.uploader || "?").charAt(0)}
+                      </div>
+                      <div>
+                        <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:16, fontWeight:600, color:G.text }}>
+                          {movie.director || movie.uploader || "Director"}
+                        </div>
+                        <div style={{ fontSize:11, color:G.muted }}>Director's Statement</div>
+                      </div>
+                    </div>
+
+                    {/* Director's notes — placeholder since we don't have the field yet */}
+                    <div style={{
+                      background:G.surface, border:`1px solid ${G.border}`,
+                      borderRadius:12, padding: isMob?"16px":"22px",
+                    }}>
+                      {movie.directorNotes ? (
+                        <p style={{ color:G.textSoft, lineHeight:1.95, fontSize: isMob?13:14, fontStyle:"italic" }}>
+                          "{movie.directorNotes}"
+                        </p>
+                      ) : (
+                        <div style={{ textAlign:"center", padding:"24px 0" }}>
+                          <div style={{ fontSize:28, marginBottom:8, opacity:.3 }}>✍</div>
+                          <div style={{ fontSize:13, color:G.muted }}>Director has not added a statement yet.</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Process details */}
+                  <div style={{ background:G.surface, border:`1px solid ${G.border}`, borderRadius:12, padding: isMob?"14px 16px":"18px 22px" }}>
+                    <div style={{ fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", marginBottom:16, fontWeight:600 }}>
+                      Creation Process
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                      {[
+                        { label:"Primary AI Tool",   value: movie.aiTool || movie.ai_tool || "Not disclosed" },
+                        { label:"Human Involvement",  value: movie.aiType || "Not specified" },
+                        { label:"Original Score",     value: "Not specified" },
+                        { label:"Training Data",      value: "Not disclosed" },
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${G.border}` }}>
+                          <span style={{ fontSize:12, color:G.muted }}>{label}</span>
+                          <span style={{ fontSize:12, fontWeight:500, color:G.text }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CREDITS & DISCLOSURE TAB */}
+              {activeTab === "credits" && (
+                <div>
+                  {/* Originality declaration */}
+                  <div style={{
+                    background:`${G.teal}11`, border:`1px solid ${G.teal}33`,
+                    borderRadius:12, padding: isMob?"12px 16px":"16px 20px", marginBottom:24,
+                    display:"flex", gap:12, alignItems:"flex-start",
+                  }}>
+                    <div style={{ fontSize:18, flexShrink:0 }}>✓</div>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:600, color:G.teal, marginBottom:4 }}>Originality Declared</div>
+                      <div style={{ fontSize:11, color:G.muted, lineHeight:1.6 }}>
+                        This creator has declared that this work is original and that AI tools and training data have been accurately disclosed.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Credits */}
+                  <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+                    {[
+                      { role:"Director",       name: movie.director || "Unknown" },
+                      { role:"Screenwriter",   name: movie.writer   || movie.director || "Unknown" },
+                      { role:"AI Supervisor",  name: movie.director || "Unknown" },
+                      { role:"Visual Effects", name: movie.aiTool || "AI-Generated" },
+                      { role:"Sound Design",   name: "Generative Audio" },
+                      { role:"Production",     name: movie.studio || "Independent" },
+                    ].map((c, i) => (
+                      <div key={i} style={{
+                        display:"flex", alignItems:"center", gap:12,
+                        padding:"10px 14px", background:G.card,
+                        borderRadius:10, border:`1px solid ${G.border}`,
+                      }}>
+                        <div style={{
+                          width:34, height:34, borderRadius:"50%",
+                          background:`linear-gradient(135deg,${G.accent}33,${G.accentDim}33)`,
+                          border:`1px solid ${G.accent}22`,
+                          display:"flex", alignItems:"center", justifyContent:"center",
+                          fontFamily:"'Syne',sans-serif", fontWeight:700, color:G.accent, fontSize:12, flexShrink:0,
+                        }}>{c.name.charAt(0)}</div>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:600, color:G.text }}>{c.name}</div>
+                          <div style={{ fontSize:10, color:G.muted, textTransform:"uppercase", letterSpacing:".06em" }}>{c.role}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Full disclosure */}
+                  <div style={{ background:G.surface, border:`1px solid ${G.border}`, borderRadius:12, padding: isMob?"14px 16px":"18px 22px" }}>
+                    <div style={{ fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", marginBottom:14, fontWeight:600 }}>
+                      Full Disclosure
+                    </div>
+                    {[
+                      { label:"Film ID",         value: `#${String(movie.id).slice(-8)}` },
+                      { label:"Submitted",       value: movie.publishedAt || "2025" },
+                      { label:"Category",        value: movie.category },
+                      { label:"Maturity Rating", value: movie.maturity || "Unrated" },
+                      { label:"AI Type",         value: movie.aiType || "Not specified" },
+                      { label:"AI Tools",        value: movie.aiTool || movie.ai_tool || "Not specified" },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:`1px solid ${G.border}` }}>
+                        <span style={{ fontSize:11, color:G.muted }}>{label}</span>
+                        <span style={{ fontSize:11, fontWeight:500, color:G.text }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* EPISODES TAB */}
+              {activeTab === "episodes" && (
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  {episodes.map((ep) => (
+                    <div key={ep.id} onClick={()=>{ setActiveEp(ep); setPlayerOpen(true); }}
+                      style={{
+                        display:"flex", gap:14, background:G.card, borderRadius:12,
+                        padding: isMob?"10px":"14px", border:`1px solid ${G.border}`,
+                        cursor:"pointer", transition:"border .18s, background .18s",
+                      }}
+                      onMouseEnter={e=>{ e.currentTarget.style.borderColor=G.accent; e.currentTarget.style.background=G.cardHover; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.borderColor=G.border; e.currentTarget.style.background=G.card; }}>
+                      <div style={{ position:"relative", flexShrink:0, width: isMob?110:150, height: isMob?62:84, borderRadius:8, overflow:"hidden" }}>
+                        <img src={ep.thumb} alt={ep.title} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                        <div style={{ position:"absolute", inset:0, background:"#0005", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          <div style={{ width:32, height:32, borderRadius:"50%", background:`${G.accent}cc`, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                            <svg width="11" height="13" viewBox="0 0 11 13" fill="none"><path d="M1 1l9 5.5L1 12V1z" fill="white"/></svg>
+                          </div>
+                        </div>
+                        <div style={{ position:"absolute", bottom:4, right:6, fontSize:10, color:"#fff", fontWeight:700, background:"#0009", borderRadius:4, padding:"1px 5px" }}>{ep.duration}</div>
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:600, fontSize: isMob?12:14, color:G.text, marginBottom:5 }}>{ep.title}</div>
+                        <p style={{ fontSize: isMob?11:12, color:G.muted, lineHeight:1.6, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{ep.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+            </div>
+
+            {/* ── SIDEBAR ── */}
+            <div>
+              {/* Quick info card */}
+              <div style={{ background:G.card, border:`1px solid ${G.border}`, borderRadius:12, padding:"16px", marginBottom:20 }}>
+                <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:13, fontWeight:600, color:G.muted, letterSpacing:".06em", textTransform:"uppercase", marginBottom:14 }}>Film Details</div>
+                {[
+                  { label:"Director",  value: movie.director },
+                  { label:"Year",      value: movie.year },
+                  { label:"Duration",  value: movie.duration },
+                  { label:"Category",  value: movie.category },
+                  { label:"AI Tool",   value: movie.aiTool || movie.ai_tool },
+                  { label:"Views",     value: movie.views || "0" },
+                  { label:"Rating",    value: movie.rating > 0 ? `${movie.rating}/10` : null },
+                ].filter(r => r.value).map(({ label, value }) => (
+                  <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:`1px solid ${G.border}` }}>
+                    <span style={{ fontSize:11, color:G.muted }}>{label}</span>
+                    <span style={{ fontSize:11, fontWeight:500, color:G.text }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Related films */}
+              {related.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", marginBottom:14 }}>More Like This</div>
+                  <div style={{ display:"flex", flexDirection: isMob?"row":"column", gap:10, overflowX: isMob?"auto":"visible", scrollbarWidth:"none", paddingBottom: isMob?4:0 }}>
+                    {related.map(m => (
+                      <div key={m.id} onClick={() => nav("watch", m)}
+                        style={{ flexShrink:0, minWidth: isMob?130:"auto", background:G.card, borderRadius:10, overflow:"hidden", border:`1px solid ${G.border}`, cursor:"pointer", transition:"border .2s" }}
+                        onMouseEnter={e=>e.currentTarget.style.borderColor=G.accent}
+                        onMouseLeave={e=>e.currentTarget.style.borderColor=G.border}>
+                        <img src={m.thumb} alt={m.title} style={{ width:"100%", height: isMob?74:60, objectFit:"cover" }}/>
+                        <div style={{ padding: isMob?"7px 8px 8px":"8px 10px 10px" }}>
+                          <div style={{ fontWeight:600, fontSize:11, color:G.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{m.title}</div>
+                          <div style={{ fontSize:10, color:G.muted, marginTop:2, display:"flex", justifyContent:"space-between" }}>
+                            <span>{m.year}</span>
+                            <RatingDot score={m.rating}/>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
   return (
     <>
