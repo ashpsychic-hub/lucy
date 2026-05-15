@@ -490,18 +490,9 @@ export default function App() {
           if (Array.isArray(catalog) && catalog.length > 0) {
             setMoviesRaw(prev => {
               const seedIds = new Set(MOVIES.map(m => m.id));
-              // Merge catalog - update existing films and add new ones
-              const catalogMap = new Map(catalog.map(m => [m.id, m]));
-              const merged = prev.map(m => catalogMap.has(m.id) ? {...m, ...catalogMap.get(m.id)} : m);
-              const existingIds = new Set(prev.map(m => m.id));
-              const newFilms = catalog.filter(m => !existingIds.has(m.id));
-              const result = [...merged, ...newFilms];
-              // Update localStorage with merged data
-              try {
-                const userFilms = result.filter(m => !MOVIES.find(s => s.id === m.id));
-                localStorage.setItem("lucy_movies", JSON.stringify(userFilms));
-              } catch {}
-              return result;
+              const existing = new Set(prev.map(m => m.id));
+              const newFilms = catalog.filter(m => !seedIds.has(m.id) && !existing.has(m.id));
+              return newFilms.length ? [...prev, ...newFilms] : prev;
             });
           }
         }
@@ -582,29 +573,14 @@ export default function App() {
   const approveMovie = async (id) => {
     setMovies(ms => ms.map(m => m.id === id ? { ...m, status:"approved" } : m));
     notify("Film approved.");
-    // Sync approval to S3 catalog
     try {
-      const bucket  = import.meta.env.VITE_S3_BUCKET;
-      const region  = import.meta.env.VITE_S3_REGION || "us-east-1";
-      const res     = await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json?t=${Date.now()}`);
+      const bucket = "lucy-raw-uploads-303602054242";
+      const region = "us-east-1";
+      const res = await fetch(`https://${bucket}.s3.${region}.amazonaws.com/catalog.json?t=${Date.now()}`);
       if (res.ok) {
         const catalog = await res.json();
         const updated = catalog.map(m => m.id === id ? { ...m, status:"approved" } : m);
-        try {
-          const { fetchAuthSession } = await import("aws-amplify/auth");
-          const sess = await fetchAuthSession();
-          const tok = sess.tokens?.accessToken?.toString() || "";
-          const lambdaUrl = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
-          const pr = await fetch(lambdaUrl, {
-            method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
-            body: JSON.stringify({filename:"catalog.json",contentType:"application/json",folder:""}),
-          });
-          if (pr.ok) {
-            const {url} = await pr.json();
-            await fetch(url, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(updated)});
-          }
-        } catch(e) { console.warn("Catalog sync failed:", e.message); }
+        await secureSaveCatalog(updated);
       }
     } catch (e) { console.warn("Catalog sync failed:", e.message); }
   };
@@ -874,275 +850,299 @@ function MovieCard({ movie, nav, isMob, cardW }) {
 
 // ─── VIDEO PLAYER OVERLAY ──────────────────────────────────────────────────────
 function VideoPlayer({ movie, episode, onClose, isMob }) {
-  const [playing, setPlaying]         = useState(false);
-  const [progress, setProgress]       = useState(0);
-  const [speed, setSpeed]             = useState(1);
-  const [volume, setVolume]           = useState(80);
-  const [muted, setMuted]             = useState(false);
-  const [showSubs, setShowSubs]       = useState(true);
-  const [activeSub, setActiveSub]     = useState(0);
-  const [activeAudio, setActiveAudio] = useState(0);
-  const [panel, setPanel]             = useState(null);
+  const [playing, setPlaying]           = useState(true);
+  const [progress, setProgress]         = useState(0);       // 0-100
+  const [currentTime, setCurrentTime]   = useState(0);
+  const [duration, setDuration]         = useState(0);
+  const [speed, setSpeed]               = useState(1);
+  const [volume, setVolume]             = useState(1);
+  const [muted, setMuted]               = useState(false);
+  const [showSubs, setShowSubs]         = useState(true);
+  const [activeSub, setActiveSub]       = useState(0);
+  const [activeAudio, setActiveAudio]   = useState(0);
+  const [panel, setPanel]               = useState(null);
   const [showControls, setShowControls] = useState(true);
-  const [fullscreen, setFullscreen]   = useState(false);
-  const [rotated, setRotated]         = useState(false);
-  const hideTimer = useRef(null);
-  const playerRef = useRef(null);
+  const [fullscreen, setFullscreen]     = useState(false);
+  const hideTimer  = useRef(null);
+  const playerRef  = useRef(null);
+  const videoRef   = useRef(null);
 
   const SPEEDS    = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-  const SUBTITLES = movie.subtitles || [
-    { id:0, label:"Off",     lang:"none"  },
-    { id:1, label:"English", lang:"en"    },
-    { id:2, label:"French",  lang:"fr"    },
-    { id:3, label:"Spanish", lang:"es"    },
-    { id:4, label:"Japanese",lang:"ja"    },
-  ];
-  const AUDIO = movie.audioTracks || [
-    { id:0, label:"Original", lang:"en" },
-    { id:1, label:"French Dub", lang:"fr" },
-    { id:2, label:"Spanish Dub", lang:"es" },
-  ];
+  const SUBTITLES = movie.subtitles || [{ id:0, label:"Off", lang:"none" }];
+  const AUDIO     = movie.audioTracks || [{ id:0, label:"Original", lang:"en" }];
 
+  const videoSrc = episode?.videoUrl || movie?.videoUrl ||
+    (movie?.videoKey ? `${S3_BASE}/${movie.videoKey}` : null);
+
+  // Auto-hide controls
   const resetHide = useCallback(() => {
     setShowControls(true);
     clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowControls(false), 3000);
+    hideTimer.current = setTimeout(() => setShowControls(false), 3500);
   }, []);
 
-  useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current); }, [playing, resetHide]);
+  useEffect(() => { resetHide(); return () => clearTimeout(hideTimer.current); }, [resetHide]);
 
-  // Simulate progress
+  // Wire video element events to state
   useEffect(() => {
-    if (!playing) return;
-    const t = setInterval(() => setProgress(p => Math.min(p + 0.02, 100)), 300);
-    return () => clearInterval(t);
+    const v = videoRef.current;
+    if (!v) return;
+    const onPlay     = () => setPlaying(true);
+    const onPause    = () => setPlaying(false);
+    const onTime     = () => {
+      setCurrentTime(v.currentTime);
+      setDuration(v.duration || 0);
+      setProgress(v.duration ? (v.currentTime / v.duration) * 100 : 0);
+    };
+    const onLoaded   = () => setDuration(v.duration || 0);
+    v.addEventListener("play",         onPlay);
+    v.addEventListener("pause",        onPause);
+    v.addEventListener("timeupdate",   onTime);
+    v.addEventListener("loadedmetadata", onLoaded);
+    return () => {
+      v.removeEventListener("play",           onPlay);
+      v.removeEventListener("pause",          onPause);
+      v.removeEventListener("timeupdate",     onTime);
+      v.removeEventListener("loadedmetadata", onLoaded);
+    };
+  }, [videoSrc]);
+
+  // Sync play/pause
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (playing) v.play().catch(()=>{});
+    else         v.pause();
   }, [playing]);
+
+  // Sync speed
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+  }, [speed]);
+
+  // Sync volume/mute
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted  = muted;
+    }
+  }, [volume, muted]);
+
+  // Fullscreen change listener
+  useEffect(() => {
+    const onFSChange = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFSChange);
+    return () => document.removeEventListener("fullscreenchange", onFSChange);
+  }, []);
 
   const toggleFS = () => {
     if (!document.fullscreenElement && playerRef.current) {
-      playerRef.current.requestFullscreen?.();
-      setFullscreen(true);
+      playerRef.current.requestFullscreen?.().catch(()=>{});
     } else {
-      document.exitFullscreen?.();
-      setFullscreen(false);
+      document.exitFullscreen?.().catch(()=>{});
     }
   };
 
+  const seek = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const pct = (e.clientX - r.left) / r.width;
+    if (videoRef.current) videoRef.current.currentTime = pct * (videoRef.current.duration || 0);
+    setProgress(pct * 100);
+  };
+
+  const fmt = (s) => {
+    if (!s || isNaN(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2, "0")}`;
+  };
+
   const PanelBtn = ({ id, label, icon }) => (
-    <button onClick={() => setPanel(panel === id ? null : id)} style={{
+    <button onClick={(e) => { e.stopPropagation(); setPanel(panel === id ? null : id); }} style={{
       background: panel === id ? `${G.accent}22` : "transparent",
       border: `1px solid ${panel === id ? G.accent : "transparent"}`,
-      color: panel === id ? G.accent : G.textSoft,
+      color: panel === id ? G.accent : "rgba(255,255,255,.75)",
       borderRadius:8, padding: isMob ? "7px 10px" : "8px 14px",
       fontSize: isMob ? 11 : 12, fontWeight:600, display:"flex", alignItems:"center", gap:6,
-      fontFamily:"'Inter',sans-serif", cursor:"pointer", transition:"all .15s",
-      whiteSpace:"nowrap",
+      fontFamily:"'Inter',sans-serif", cursor:"pointer", transition:"all .15s", whiteSpace:"nowrap",
     }}>
       {icon}{label}
     </button>
   );
 
-  const subLabel = SUBTITLES.find(s=>s.id===activeSub)?.label || "Off";
+  const subLabel   = SUBTITLES.find(s=>s.id===activeSub)?.label || "Off";
   const audioLabel = AUDIO.find(a=>a.id===activeAudio)?.label || "Original";
 
   return (
-    <div style={{
-      position:"fixed", inset:0, zIndex:1000, background:"#000",
-      display:"flex", flexDirection:"column",
-      transform: rotated ? "rotate(90deg)" : "none",
-      transformOrigin: "center center",
-      width: rotated ? "100vh" : "100%",
-      height: rotated ? "100vw" : "100%",
-      top: rotated ? `calc((100vh - 100vw) / 2)` : 0,
-      left: rotated ? `calc((100vw - 100vh) / 2)` : 0,
-      transition: "transform .35s cubic-bezier(.4,0,.2,1)",
-    }} ref={playerRef} onMouseMove={resetHide} onClick={() => { if(!panel) setPlaying(p=>!p); }}>
+    <div
+      ref={playerRef}
+      onMouseMove={resetHide}
+      onTouchStart={resetHide}
+      onClick={() => { if (!panel) { setPlaying(p=>!p); resetHide(); } }}
+      style={{
+        position:"fixed", inset:0, zIndex:1000, background:"#000",
+        display:"flex", flexDirection:"column",
+      }}
+    >
+      {/* Video element — no native controls */}
+      <video
+        ref={videoRef}
+        key={videoSrc}
+        src={videoSrc}
+        autoPlay
+        playsInline
+        style={{
+          position:"absolute", inset:0, width:"100%", height:"100%",
+          objectFit:"contain", background:"#000",
+        }}
+      />
 
-      {/* Video area */}
-      <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
-        {(episode?.videoUrl || movie?.videoUrl || movie?.videoKey) ? (
-  <video
-    key={episode?.videoUrl || movie?.videoUrl || movie?.videoKey}
-    src={episode?.videoUrl || movie?.videoUrl || (movie?.videoKey ? "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com/" + movie.videoKey : null)}
-    style={{ width:"100%", height:"100%", objectFit:"contain", background:"#000", position:"absolute", inset:0, zIndex:10 }}
-    autoPlay
-    playsInline
-    controls
-  />
-        ) : (
-          <img src={movie.banner} alt={movie.title}
-            style={{ width:"100%", height:"100%", objectFit:"cover",
-              filter:`brightness(${playing ? 0.5 : 0.3})`, transition:"filter .4s" }}/>
-        )}
-
-        {/* Subtitle overlay */}
-        {showSubs && activeSub !== 0 && playing && (
-          <div style={{
-            position:"absolute", bottom: isMob ? 80 : 100, left:"50%", transform:"translateX(-50%)",
-            background:"#000000bb", borderRadius:6, padding:"6px 16px",
-            fontSize: isMob ? 13 : 16, color:"#fff", fontWeight:500,
-            fontFamily:"'Inter',sans-serif", textAlign:"center", maxWidth:"80%",
-            textShadow:"0 2px 4px #000",
-          }}>
-            {SUBTITLES[activeSub]?.label === "English"  && "The signal is growing stronger..."}
-            {SUBTITLES[activeSub]?.label === "French"   && "Le signal devient plus fort..."}
-            {SUBTITLES[activeSub]?.label === "Spanish"  && "La señal se vuelve más fuerte..."}
-            {SUBTITLES[activeSub]?.label === "Japanese" && "信号がどんどん強くなっている..."}
-          </div>
-        )}
-
-        {/* Centre play/pause indicator */}
-        <div style={{
-          position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
-          pointerEvents:"none",
+      {/* TOP BAR — always shows back button */}
+      <div
+        onClick={e=>e.stopPropagation()}
+        style={{
+          position:"absolute", top:0, left:0, right:0, zIndex:10,
+          background:"linear-gradient(180deg,#000d 0%,transparent 100%)",
+          padding: isMob ? "14px 16px 28px" : "18px 28px 40px",
+          display:"flex", alignItems:"center", gap:12,
           opacity: showControls ? 1 : 0, transition:"opacity .3s",
+          pointerEvents: showControls ? "auto" : "none",
+        }}
+      >
+        <button
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          style={{
+            background:"rgba(0,0,0,0.5)", border:"1px solid rgba(255,255,255,0.2)",
+            borderRadius:10, color:"#fff", cursor:"pointer",
+            display:"flex", alignItems:"center", gap:8,
+            padding: isMob ? "8px 14px" : "10px 18px",
+            fontSize: isMob ? 12 : 13, fontWeight:600,
+            fontFamily:"'Inter',sans-serif",
+            backdropFilter:"blur(8px)",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3L5 8l5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          {!isMob && "Back"}
+        </button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize: isMob?15:18, fontWeight:600, color:"#fff", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {episode?.title || movie.title}
+          </div>
+          {!isMob && <div style={{ fontSize:11, color:"rgba(255,255,255,.5)", marginTop:2 }}>{movie.director} · {movie.year}</div>}
+        </div>
+      </div>
+
+      {/* Centre play/pause indicator */}
+      <div style={{
+        position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
+        pointerEvents:"none",
+        opacity: showControls && !playing ? 1 : 0, transition:"opacity .3s",
+      }}>
+        <div style={{
+          width: isMob?60:80, height: isMob?60:80, borderRadius:"50%",
+          background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:`0 0 60px ${G.accentGlow}`,
         }}>
-          {!playing && (
-            <div style={{
-              width: isMob ? 60 : 80, height: isMob ? 60 : 80, borderRadius:"50%",
-              background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
-              display:"flex", alignItems:"center", justifyContent:"center",
-              boxShadow:`0 0 60px ${G.accentGlow}`,
-            }}>
-              <svg width={isMob?20:28} height={isMob?24:34} viewBox="0 0 22 26" fill="none">
-                <path d="M2 2l18 11L2 24V2z" fill="white"/>
-              </svg>
+          <svg width={isMob?20:28} height={isMob?24:34} viewBox="0 0 22 26" fill="none">
+            <path d="M2 2l18 11L2 24V2z" fill="white"/>
+          </svg>
+        </div>
+      </div>
+
+      {/* Subtitle overlay */}
+      {showSubs && activeSub !== 0 && playing && (
+        <div style={{
+          position:"absolute", bottom: isMob ? 100 : 120, left:"50%", transform:"translateX(-50%)",
+          background:"#000000bb", borderRadius:6, padding:"6px 16px",
+          fontSize: isMob?13:16, color:"#fff", fontWeight:500, fontFamily:"'Inter',sans-serif",
+          textAlign:"center", maxWidth:"80%", textShadow:"0 2px 4px #000", zIndex:5,
+        }}>
+          {SUBTITLES[activeSub]?.label === "English"  && "The signal is growing stronger..."}
+          {SUBTITLES[activeSub]?.label === "French"   && "Le signal devient plus fort..."}
+          {SUBTITLES[activeSub]?.label === "Spanish"  && "La señal se vuelve más fuerte..."}
+          {SUBTITLES[activeSub]?.label === "Japanese" && "信号がどんどん強くなっている..."}
+        </div>
+      )}
+
+      {/* Speed badge */}
+      {speed !== 1 && (
+        <div style={{
+          position:"absolute", top:16, right:16, zIndex:10,
+          background:`${G.accent}cc`, color:"#fff", borderRadius:6,
+          padding:"4px 10px", fontSize:12, fontWeight:700, fontFamily:"'Syne',sans-serif",
+        }}>{speed}x</div>
+      )}
+
+      {/* Panel overlay — speed / subs / audio / info */}
+      {panel && (
+        <div onClick={e=>e.stopPropagation()} style={{
+          position:"absolute", bottom: isMob?110:120, right: isMob?12:24, zIndex:20,
+          background:"rgba(10,8,20,0.95)", border:`1px solid ${G.border}`,
+          borderRadius:12, padding:"12px 0", minWidth:160,
+          backdropFilter:"blur(20px)",
+        }}>
+          {panel === "speed" && SPEEDS.map(s => (
+            <button key={s} onClick={()=>{ setSpeed(s); setPanel(null); }} style={{
+              display:"block", width:"100%", padding:"10px 18px", background:"none",
+              color: speed===s ? G.accent : G.text, fontSize:13, fontWeight: speed===s?700:400,
+              fontFamily:"'Inter',sans-serif", textAlign:"left", cursor:"pointer",
+              borderLeft: speed===s ? `3px solid ${G.accent}` : "3px solid transparent",
+            }}>{s}× {s===1?"(Normal)":""}</button>
+          ))}
+          {panel === "subs" && SUBTITLES.map(s => (
+            <button key={s.id} onClick={()=>{ setActiveSub(s.id); setPanel(null); }} style={{
+              display:"block", width:"100%", padding:"10px 18px", background:"none",
+              color: activeSub===s.id ? G.accent : G.text, fontSize:13, fontWeight: activeSub===s.id?700:400,
+              fontFamily:"'Inter',sans-serif", textAlign:"left", cursor:"pointer",
+              borderLeft: activeSub===s.id ? `3px solid ${G.accent}` : "3px solid transparent",
+            }}>{s.label}</button>
+          ))}
+          {panel === "audio" && AUDIO.map(a => (
+            <button key={a.id} onClick={()=>{ setActiveAudio(a.id); setPanel(null); }} style={{
+              display:"block", width:"100%", padding:"10px 18px", background:"none",
+              color: activeAudio===a.id ? G.accent : G.text, fontSize:13, fontWeight: activeAudio===a.id?700:400,
+              fontFamily:"'Inter',sans-serif", textAlign:"left", cursor:"pointer",
+              borderLeft: activeAudio===a.id ? `3px solid ${G.accent}` : "3px solid transparent",
+            }}>{a.label}</button>
+          ))}
+          {panel === "info" && (
+            <div style={{ padding:"4px 18px 8px" }}>
+              <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:16, fontWeight:700, color:G.text, marginBottom:8 }}>{movie.title}</div>
+              <p style={{ fontSize:12, color:G.muted, lineHeight:1.7, marginBottom:8 }}>{movie.desc}</p>
+              {[["Director",movie.director],["AI Tool",movie.aiTool||movie.ai_tool],["Rating",movie.maturity]].map(([l,v]) => v && (
+                <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderTop:`1px solid ${G.border}` }}>
+                  <span style={{ fontSize:11, color:G.muted }}>{l}</span>
+                  <span style={{ fontSize:11, color:G.text, fontWeight:500 }}>{v}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
-
-        {/* Speed badge */}
-        {speed !== 1 && (
-          <div style={{
-            position:"absolute", top:16, right:16,
-            background:`${G.accent}cc`, color:"#fff", borderRadius:6,
-            padding:"4px 10px", fontSize:12, fontWeight:700, fontFamily:"'Syne',sans-serif",
-          }}>{speed}x</div>
-        )}
-
-        {/* TOP BAR */}
-        <div style={{
-          position:"absolute", top:0, left:0, right:0,
-          padding: isMob ? "12px 14px" : "16px 24px",
-          background:"linear-gradient(180deg,#000d 0%,transparent 100%)",
-          display:"flex", alignItems:"center", gap:12,
-          opacity: showControls ? 1 : 0, transition:"opacity .3s",
-        }} onClick={e => e.stopPropagation()}>
-          <button onClick={onClose} style={{
-            background:"#ffffff18", border:"1px solid #ffffff20", color:"#fff",
-            borderRadius:8, padding: isMob ? "7px 12px" : "8px 16px",
-            fontSize:12, fontWeight:500, fontFamily:"'Inter',sans-serif",
-            display:"flex", alignItems:"center", gap:6, cursor:"pointer",
-          }}>
-            <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            {!isMob && "Back"}
-          </button>
-          <div style={{ flex:1 }}>
-            <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize: isMob ? 14 : 18, fontWeight:700, color:"#fff" }}>{movie.title}</div>
-            {!isMob && <div style={{ fontSize:11, color:"rgba(255,255,255,.5)", marginTop:2 }}>{movie.year} · {movie.duration} · {audioLabel} · {subLabel}</div>}
-          </div>
-        </div>
-
-        {/* SETTINGS PANEL */}
-        {panel && (
-          <div onClick={e=>e.stopPropagation()} style={{
-            position:"absolute", bottom: isMob ? 130 : 110, right: isMob ? 8 : 24,
-            background:"#0f0d1e", border:`1px solid ${G.border}`,
-            borderRadius:12, minWidth: isMob ? 180 : 220,
-            boxShadow:"0 16px 60px #000a",
-            overflow:"hidden", zIndex:10,
-            animation:"fadeUp .2s ease",
-          }}>
-            {/* Speed */}
-            {panel === "speed" && (
-              <div>
-                <div style={{ padding:"12px 16px 8px", fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", fontFamily:"'Inter',sans-serif", borderBottom:`1px solid ${G.border}` }}>Playback Speed</div>
-                {SPEEDS.map(s => (
-                  <button key={s} onClick={()=>{setSpeed(s);setPanel(null);}} style={{
-                    display:"block", width:"100%", textAlign:"left",
-                    padding:"11px 16px", background: speed===s ? `${G.accent}18` : "transparent",
-                    color: speed===s ? G.accent : G.textSoft, fontSize:13,
-                    fontFamily:"'Inter',sans-serif", cursor:"pointer", transition:"background .15s",
-                    fontWeight: speed===s ? 600 : 400,
-                  }}>
-                    {s === 1 ? "Normal (1×)" : `${s}×`}
-                    {speed===s && <span style={{float:"right",color:G.accent}}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Subtitles */}
-            {panel === "subs" && (
-              <div>
-                <div style={{ padding:"12px 16px 8px", fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", fontFamily:"'Inter',sans-serif", borderBottom:`1px solid ${G.border}` }}>Subtitles</div>
-                {SUBTITLES.map(s => (
-                  <button key={s.id} onClick={()=>{setActiveSub(s.id);setShowSubs(s.id!==0);setPanel(null);}} style={{
-                    display:"block", width:"100%", textAlign:"left",
-                    padding:"11px 16px", background: activeSub===s.id ? `${G.accent}18` : "transparent",
-                    color: activeSub===s.id ? G.accent : G.textSoft, fontSize:13,
-                    fontFamily:"'Inter',sans-serif", cursor:"pointer", transition:"background .15s",
-                    fontWeight: activeSub===s.id ? 600 : 400,
-                  }}>
-                    {s.label}
-                    {activeSub===s.id && <span style={{float:"right",color:G.accent}}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Audio */}
-            {panel === "audio" && (
-              <div>
-                <div style={{ padding:"12px 16px 8px", fontSize:10, color:G.muted, letterSpacing:".1em", textTransform:"uppercase", fontFamily:"'Inter',sans-serif", borderBottom:`1px solid ${G.border}` }}>Audio Track</div>
-                {AUDIO.map(a => (
-                  <button key={a.id} onClick={()=>{setActiveAudio(a.id);setPanel(null);}} style={{
-                    display:"block", width:"100%", textAlign:"left",
-                    padding:"11px 16px", background: activeAudio===a.id ? `${G.accent}18` : "transparent",
-                    color: activeAudio===a.id ? G.accent : G.textSoft, fontSize:13,
-                    fontFamily:"'Inter',sans-serif", cursor:"pointer", transition:"background .15s",
-                    fontWeight: activeAudio===a.id ? 600 : 400,
-                  }}>
-                    {a.label}
-                    {activeAudio===a.id && <span style={{float:"right",color:G.accent}}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Info */}
-            {panel === "info" && (
-              <div style={{ padding:"16px" }}>
-                <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:18, fontWeight:700, color:G.text, marginBottom:8 }}>{movie.title}</div>
-                <p style={{ fontSize:12, color:G.muted, lineHeight:1.7, marginBottom:12 }}>{movie.desc}</p>
-                {[
-                  ["Director", movie.director],
-                  ["Writer",   movie.writer],
-                  ["AI Tool",  movie.aiTool || movie.ai_tool],
-                  ["Studio",   movie.studio],
-                  ["Rating",   movie.maturity],
-                ].map(([l,v]) => v && (
-                  <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderTop:`1px solid ${G.border}` }}>
-                    <span style={{ fontSize:11, color:G.muted }}>{l}</span>
-                    <span style={{ fontSize:11, color:G.text, fontWeight:500 }}>{v}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* BOTTOM CONTROLS */}
-      <div onClick={e=>e.stopPropagation()} style={{
-        background:"linear-gradient(0deg,#000f 0%,#000a 60%,transparent 100%)",
-        padding: isMob ? "10px 12px 20px" : "14px 24px 24px",
-        opacity: showControls ? 1 : 0, transition:"opacity .3s",
-      }}>
+      <div
+        onClick={e=>e.stopPropagation()}
+        style={{
+          position:"absolute", bottom:0, left:0, right:0, zIndex:10,
+          background:"linear-gradient(0deg,#000f 0%,#000a 60%,transparent 100%)",
+          padding: isMob ? "20px 14px 28px" : "24px 28px 28px",
+          opacity: showControls ? 1 : 0, transition:"opacity .3s",
+          pointerEvents: showControls ? "auto" : "none",
+        }}
+      >
         {/* Progress bar */}
-        <div style={{ position:"relative", marginBottom: isMob ? 10 : 14, cursor:"pointer" }}
-          onClick={e => { const r = e.currentTarget.getBoundingClientRect(); setProgress(((e.clientX-r.left)/r.width)*100); }}>
+        <div
+          style={{ position:"relative", marginBottom: isMob?12:16, cursor:"pointer", padding:"6px 0" }}
+          onClick={seek}
+        >
           <div style={{ height:4, background:"rgba(255,255,255,.2)", borderRadius:2, position:"relative" }}>
-            <div style={{ width:`${progress}%`, height:"100%", background:`linear-gradient(90deg,${G.accent},${G.accentDim})`, borderRadius:2, transition:"width .3s linear" }}/>
+            <div style={{ width:`${progress}%`, height:"100%", background:`linear-gradient(90deg,${G.accent},${G.accentDim})`, borderRadius:2 }}/>
             <div style={{
-              position:"absolute", top:"50%", left:`${progress}%`,
+              position:"absolute", top:"50%", left:`${Math.min(progress,99.5)}%`,
               transform:"translate(-50%,-50%)",
               width:14, height:14, borderRadius:"50%", background:G.accent,
               boxShadow:`0 0 8px ${G.accent}`,
@@ -1151,10 +1151,10 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
         </div>
 
         {/* Controls row */}
-        <div style={{ display:"flex", alignItems:"center", gap: isMob ? 6 : 12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap: isMob?8:12 }}>
           {/* Play/Pause */}
           <button onClick={()=>setPlaying(p=>!p)} style={{
-            width: isMob ? 36 : 44, height: isMob ? 36 : 44, borderRadius:"50%",
+            width: isMob?38:44, height: isMob?38:44, borderRadius:"50%",
             background:`linear-gradient(135deg,${G.accent},${G.accentDim})`,
             display:"flex", alignItems:"center", justifyContent:"center",
             border:"none", cursor:"pointer", flexShrink:0,
@@ -1176,14 +1176,14 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
           </button>
 
           {!isMob && (
-            <input type="range" min={0} max={100} value={muted?0:volume}
+            <input type="range" min={0} max={1} step={0.01} value={muted?0:volume}
               onChange={e=>{ setVolume(+e.target.value); setMuted(false); }}
               style={{ width:80, accentColor:G.accent, cursor:"pointer" }}/>
           )}
 
-          {/* Time */}
-          <span style={{ fontSize: isMob ? 10 : 12, color:"rgba(255,255,255,.6)", fontFamily:"'Inter',sans-serif", whiteSpace:"nowrap" }}>
-            {Math.floor(progress*108/100)}:{String(Math.floor((progress*108/100*60)%60)).padStart(2,"0")} / {movie.duration}
+          {/* Real time display */}
+          <span style={{ fontSize: isMob?10:12, color:"rgba(255,255,255,.6)", fontFamily:"'Inter',sans-serif", whiteSpace:"nowrap" }}>
+            {fmt(currentTime)} / {duration ? fmt(duration) : (movie.duration || "—")}
           </span>
 
           <div style={{ flex:1 }}/>
@@ -1192,32 +1192,12 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
           <PanelBtn id="speed" label={speed===1 ? "Speed" : `${speed}×`} icon={
             <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 3v7l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4"/></svg>
           }/>
-          <PanelBtn id="subs"  label={isMob ? "CC" : `CC: ${subLabel}`} icon={
+          <PanelBtn id="subs" label={isMob ? "CC" : `CC: ${subLabel}`} icon={
             <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.4"/><path d="M5 10h4M5 13h6M11 10h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
           }/>
-          <PanelBtn id="audio" label={isMob ? "Audio" : audioLabel} icon={
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4"/><path d="M4 10a6 6 0 0012 0M2 10a8 8 0 0016 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
-          }/>
-          <PanelBtn id="info"  label={isMob ? "" : "About"} icon={
+          <PanelBtn id="info" label={isMob ? "" : "About"} icon={
             <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4"/><path d="M10 9v6M10 6.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           }/>
-
-          {/* Rotate & Maximize */}
-          {isMob && (
-            <button onClick={() => setRotated(r => !r)} style={{
-              background: rotated ? `${G.accent}33` : "none",
-              border: `1px solid ${rotated ? G.accent : "transparent"}`,
-              color: rotated ? G.accent : "rgba(255,255,255,.7)",
-              borderRadius:8, cursor:"pointer", padding:"6px 8px", display:"flex", alignItems:"center", gap:5,
-              transition:"all .18s",
-            }}>
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                <rect x="3" y="6" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M7 6V4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2h-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                <path d="M10 14l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          )}
 
           {/* Fullscreen */}
           <button onClick={toggleFS} style={{ background:"none", color:"rgba(255,255,255,.7)", border:"none", cursor:"pointer", padding:6, display:"flex" }}>
@@ -1233,6 +1213,7 @@ function VideoPlayer({ movie, episode, onClose, isMob }) {
     </div>
   );
 }
+
 
 // ─── EPISODES ──────────────────────────────────────────────────────────────────
 const S3_BASE = "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com";
@@ -1632,31 +1613,19 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadToS3 = async (file, folder) => {
-    const BACKEND_URL = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
-    const { fetchAuthSession } = await import("aws-amplify/auth");
-    const session = await fetchAuthSession();
-    const token = session.tokens?.accessToken?.toString() || "";
-    const res = await fetch(BACKEND_URL, {
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+    const res = await fetch(`${BACKEND_URL}/api/presign`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename:    file.name,
-        contentType: file.type || (
-          file.name?.match(/\.mp4$/i) ? "video/mp4" :
-          file.name?.match(/\.mov$/i) ? "video/quicktime" :
-          file.name?.match(/\.(jpg|jpeg)$/i) ? "image/jpeg" :
-          file.name?.match(/\.png$/i) ? "image/png" :
-          file.name?.match(/\.webp$/i) ? "image/webp" :
-          "video/mp4"
-        ),
+        contentType: file.type || "application/octet-stream",
         folder,
       }),
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "no response body");
-      throw new Error(`Upload URL failed (${res.status}): ${errText}`);
-    }
+    if (!res.ok) throw new Error("Failed to get upload URL");
     const { url, key } = await res.json();
 
     const upload = await fetch(url, {
@@ -1737,34 +1706,17 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
 
       // Save to shared S3 catalog so all devices can see it
       try {
-        const bucket  = import.meta.env.VITE_S3_BUCKET;
-        const region  = import.meta.env.VITE_S3_REGION || "us-east-1";
-        const catUrl  = `https://${bucket}.s3.${region}.amazonaws.com/catalog.json`;
-        let catalog   = [];
+        const catUrl = "https://lucy-raw-uploads-303602054242.s3.us-east-1.amazonaws.com/catalog.json";
+        let catalog  = [];
         try {
           const res = await fetch(catUrl + "?t=" + Date.now());
           if (res.ok) catalog = await res.json();
         } catch {}
         catalog.push(m);
-        // Save catalog via Lambda presigned URL
-        try {
-          const lambdaUrl = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
-          const { fetchAuthSession } = await import("aws-amplify/auth");
-          const sess = await fetchAuthSession();
-          const tok = sess.tokens?.accessToken?.toString() || "";
-          const pr = await fetch(lambdaUrl, {
-            method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
-            body: JSON.stringify({filename:"catalog.json",contentType:"application/json",folder:""}),
-          });
-          if (pr.ok) {
-            const {url} = await pr.json();
-            await fetch(url, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(catalog)});
-          }
-        } catch (catalogErr) {
-          console.warn("Catalog save failed:", catalogErr.message);
-        }
-      } catch(outerCatalogErr) { console.warn("Catalog error:", outerCatalogErr.message); }
+        await secureSaveCatalog(catalog);
+      } catch (catalogErr) {
+        console.warn("Catalog save failed:", catalogErr.message);
+      }
 
       setMovies(ms => [...ms, m]);
       notify("Film uploaded successfully! Submitted for admin review. 🎬");
