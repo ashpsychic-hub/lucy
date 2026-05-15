@@ -1644,7 +1644,10 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
       }),
     });
 
-    if (!res.ok) throw new Error("Failed to get upload URL");
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "no response body");
+      throw new Error(`Upload URL failed (${res.status}): ${errText}`);
+    }
     const { url, key } = await res.json();
 
     const upload = await fetch(url, {
