@@ -1563,7 +1563,7 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
     aiTool:"", aiType:"Fully AI Generated", storage:"cloud",
     director:"", writer:"", studio:"",
     maturity:"PG-13", language:"English",
-    videoFile:null, thumbFile:null, thumbUrl:"",
+    videoFile:null, thumbFile:null, thumbUrl:"", directorNotes:"",
     audioTracks:[], subtitleFiles:[],
   });
 
@@ -1655,6 +1655,7 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
         desc:     form.desc,
         director: form.director,
         writer:   form.writer || form.director,
+        directorNotes: form.directorNotes,
         studio:   form.studio || "Independent",
         aiTool:   form.aiTool,
         aiType:   form.aiType,
@@ -1871,6 +1872,10 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
 
           <Field label="Synopsis / Description *">
             <textarea rows={5} value={form.desc} onChange={e => f("desc", e.target.value)} placeholder="Describe the story, themes, and tone of your film…" style={{ resize:"vertical" }}/>
+          </Field>
+
+          <Field label="Director's Notes" hint="What were you trying to make? How did you use AI?">
+            <textarea rows={5} value={form.directorNotes} onChange={e => f("directorNotes", e.target.value)} placeholder="Describe your creative process..." style={{ resize:"vertical" }}/>
           </Field>
 
           <Field label="AI Tool(s) Used">
