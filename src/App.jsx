@@ -1251,7 +1251,7 @@ function WatchPage({ movie, nav, movies, isMob }) {
       {playerOpen && <VideoPlayer movie={movie} episode={activeEp || episodes[0]} onClose={()=>setPlayerOpen(false)} isMob={isMob}/>}
       <div style={{ opacity:v?1:0, transition:"opacity .5s", paddingBottom: isMob?100:80 }}>
         <div style={{ position:"relative", height: isMob?"60vw":"55vh", minHeight: isMob?220:340, overflow:"hidden" }}>
-          <img src={movie.banner||movie.thumb} alt={movie.title} style={{ width:"100%", height:"100%", objectFit:"cover", filter:"brightness(.35)" }}/>
+          <img src={movie.banner||movie.thumb} alt={movie.title} style={{ width:"100%", height:"100%", objectFit:"cover", filter:"brightness(.5)" }}/>
           <div style={{ position:"absolute", inset:0, background:"linear-gradient(0deg,#07060f 0%,#07060fcc 15%,#07060f77 45%,transparent 75%)" }}/>
           <div style={{ position:"absolute", inset:0, background:"linear-gradient(90deg,#07060fcc 0%,transparent 60%)" }}/>
           <button className="btn-ghost" onClick={()=>nav("home")} style={{ position:"absolute", top:16, left: isMob?14:24, display:"flex", alignItems:"center", gap:6, padding:"7px 12px", fontSize:12, background:"#0009", backdropFilter:"blur(8px)" }}>
@@ -1260,7 +1260,7 @@ function WatchPage({ movie, nav, movies, isMob }) {
           </button>
         </div>
         <div style={{ padding: isMob?"0 16px":"0 40px", maxWidth:1000, margin:"0 auto" }}>
-          <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", marginTop: isMob?-8:-12 }}>
+          <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", marginTop:8 }}>
             {(Array.isArray(movie.genre)?movie.genre:[movie.genre]).filter(Boolean).slice(0,3).map(g=><Chip key={g} label={g} color={G.accent}/>)}
             {movie.maturity && <Chip label={movie.maturity} color={G.muted}/>}
             {movie.aiType   && <Chip label={movie.aiType}   color={G.lavender}/>}
