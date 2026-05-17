@@ -1590,30 +1590,42 @@ function UploadPage({ user, movies, setMovies, notify, nav, isMob }) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadToS3 = async (file, folder) => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-
-    const res = await fetch(`${BACKEND_URL}/api/presign`, {
+    const LAMBDA_URL = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
+    let token = "";
+    try {
+      const { fetchAuthSession } = await import("aws-amplify/auth");
+      const session = await fetchAuthSession();
+      token = session.tokens?.accessToken?.toString() || "";
+    } catch(e) {
+      const keys = Object.keys(localStorage).filter(k => k.includes("accessToken"));
+      if (keys.length) token = localStorage.getItem(keys[0]) || "";
+    }
+    const contentType = file.type || (
+      file.name?.match(/\.mp4$/i) ? "video/mp4" :
+      file.name?.match(/\.mov$/i) ? "video/quicktime" :
+      file.name?.match(/\.(jpg|jpeg)$/i) ? "image/jpeg" :
+      file.name?.match(/\.png$/i) ? "image/png" :
+      "video/mp4"
+    );
+    const res = await fetch(LAMBDA_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename:    file.name,
-        contentType: file.type || "application/octet-stream",
-        folder,
-      }),
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({ filename: file.name, contentType, folder }),
     });
-
-    if (!res.ok) throw new Error("Failed to get upload URL");
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error("Upload URL failed (" + res.status + "): " + err);
+    }
     const { url, key } = await res.json();
-
     const upload = await fetch(url, {
       method: "PUT",
-      headers: { "Content-Type": file.type || "application/octet-stream" },
+      headers: { "Content-Type": contentType },
       body: file,
     });
-
-    if (!upload.ok) throw new Error("Upload to S3 failed");
+    if (!upload.ok) throw new Error("S3 upload failed: " + upload.status);
     return key;
   };
+
 
   const submit = async () => {
     if (!form.title || !form.desc) return notify("Title and description are required.", "error");
