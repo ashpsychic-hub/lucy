@@ -1,5 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ─── Amplify Configuration ────────────────────────────────────────────────────
+import { Amplify } from "aws-amplify";
+Amplify.configure({
+  Auth: {
+    Cognito: {
+      userPoolId:       "us-east-1_7JrThkv3l",
+      userPoolClientId: "3v66q9n3fqq4mscq9sdmskno18",
+      region:           "us-east-1",
+    }
+  }
+});
+
+
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const G = {
   bg:        "#07060f",
