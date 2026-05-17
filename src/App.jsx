@@ -43,6 +43,28 @@ const FONTS = `
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&family=Syne:wght@400;500;600;700;800&display=swap');
 `;
 
+
+async function secureSaveCatalog(catalog) {
+  const LAMBDA_URL = "https://6k8fgusfm9.execute-api.us-east-1.amazonaws.com/default/lucy-presign";
+  let token = "";
+  try {
+    const { fetchAuthSession } = await import("aws-amplify/auth");
+    const session = await fetchAuthSession();
+    token = session.tokens?.accessToken?.toString() || "";
+  } catch(e) {
+    const keys = Object.keys(localStorage).filter(k => k.includes("accessToken"));
+    if (keys.length) token = localStorage.getItem(keys[0]) || "";
+  }
+  const pr = await fetch(LAMBDA_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
+    body: JSON.stringify({filename:"catalog.json", contentType:"application/json", folder:""}),
+  });
+  if (!pr.ok) throw new Error("Presign failed");
+  const {url} = await pr.json();
+  await fetch(url, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(catalog)});
+}
+
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const CATEGORIES = {
   anime:"Anime", action:"Action", drama:"Drama", scifi:"Sci-Fi",
